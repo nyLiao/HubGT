@@ -1,0 +1,14 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+**/__pycache__/
+
+# Dataset
+/data/*
+/dataset/*
+
+# Log files
+exps/*
+*.log
+*.out
