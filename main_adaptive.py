@@ -8,23 +8,29 @@ from torch.utils.data import DataLoader
 from functools import partial
 from model import GT
 from lr import PolynomialDecayLR
+import os
+import time
 import argparse
-import math
 from tqdm import tqdm
-from preprocess_data import node_sampling, process_data
+from preprocess_data import process_data
 from torch.nn.functional import normalize
 import scipy.sparse as sp
 from numpy.linalg import inv
 
 
+def get_time():
+    torch.cuda.synchronize()
+    return time.time()
+
+
 def train(args, model, device, loader, optimizer, lr_scheduler):
     model.train()
 
-    for batch in tqdm(loader, desc="Iteration"):
+    for batch in loader:
         batch = batch.to(device)
         pred = model(batch)
         y_true = batch.y.view(-1)
-        loss = F.nll_loss(pred, y_true)
+        loss = F.nll_loss(pred, y_true, ignore_index=-1)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -36,10 +42,10 @@ def eval_train(args, model, device, loader):
     loss_list = []
     model.eval()
     with torch.no_grad():
-        for batch in tqdm(loader, desc="Iteration"):
+        for batch in loader:
             batch = batch.to(device)
             pred = model(batch)
-            loss_list.append(F.nll_loss(pred, batch.y.view(-1)).item())
+            loss_list.append(F.nll_loss(pred, batch.y.view(-1), ignore_index=-1).item())
             y_true.append(batch.y)
             y_pred.append(pred.argmax(1))
 
@@ -57,10 +63,10 @@ def eval(args, model, device, loader):
     loss_list = []
     model.eval()
     with torch.no_grad():
-        for batch in tqdm(loader, desc="Iteration"):
+        for batch in loader:
             batch = batch.to(device)
             pred = model(batch)
-            loss_list.append(F.nll_loss(pred, batch.y.view(-1)).item())
+            loss_list.append(F.nll_loss(pred, batch.y.view(-1), ignore_index=-1).item())
             y_true.append(batch.y)
             y_pred.append(pred.argmax(1))
 
@@ -176,11 +182,22 @@ def main():
     args = parser.parse_args()
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
 
-    data_list = torch.load('./dataset/'+args.dataset_name+'/data.pt')
-    feature = torch.load('./dataset/'+args.dataset_name+'/feature.pt')
-    y = torch.load('./dataset/'+args.dataset_name+'/y.pt')
-    train_dataset, test_dataset, valid_dataset = random_split(data_list, frac_train=0.6, frac_valid=0.2, frac_test=0.2, seed=args.seed)
+    if not os.path.exists('./dataset/' + args.dataset_name):
+        data_list, feature, y = process_data(args.dataset_name)
+    else:
+        data_list = torch.load('./dataset/'+args.dataset_name+'/data.pt')
+        feature = torch.load('./dataset/'+args.dataset_name+'/feature.pt')
+        y = torch.load('./dataset/'+args.dataset_name+'/y.pt')
+
+    if args.dataset_name in ['arxiv-year', 'snap-patents']:
+        frac_train, frac_valid, frac_test = 0.5, 0.25, 0.25
+    elif args.dataset_name in ['squirrel', 'chameleon', 'wisconsin']:
+        frac_train, frac_valid, frac_test = 0.48, 0.32, 0.20
+    else:
+        frac_train, frac_valid, frac_test = 0.6, 0.2, 0.2
+    train_dataset, test_dataset, valid_dataset = random_split(data_list, frac_train=frac_train, frac_valid=frac_valid, frac_test=frac_test, seed=args.seed)
     print('dataset load successfully')
+
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, shuffle=True, perturb=args.perturb_feature))
     val_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, shuffle=False))
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, shuffle=False))
@@ -220,41 +237,28 @@ def main():
     p = (1 - 4 * p_min) * sampling_weight / sum(sampling_weight) + p_min
 
     for epoch in range(1, args.epochs+1):
-        print("====epoch " + str(epoch))
         train(args, model, device, train_loader, optimizer, lr_scheduler)
         lr_scheduler.step()
 
-        print("====Evaluation")
+        start = get_time()
         train_acc, train_loss = eval_train(args, model, device, train_loader)
+        epoch_time = get_time() - start
 
         val_acc, val_loss = eval(args, model, device, val_loader)
         test_acc, test_loss = eval(args, model, device, test_loader)
 
-        print("train_acc: %f val_acc: %f test_acc: %f" % (train_acc, val_acc, test_acc))
-        print("train_loss: %f val_loss: %f test_loss: %f" % (train_loss, val_loss, test_loss))
+        print_str = f'Epoch: {epoch:02d}, ' + \
+                    f'train_loss: {train_loss:.4f}, ' + \
+                    f'train_acc: {train_acc * 100:.2f}%, ' + \
+                    f'val_loss: {val_loss:.2f}, ' + \
+                    f'val_acc: {val_acc * 100:.2f}%, ' + \
+                    f'test_loss: {test_loss:.2f}, ' + \
+                    f'test_acc: {test_acc * 100:.2f}%, ' + \
+                    f'Time: {epoch_time:.2f}s'
+        print(print_str)
         val_acc_list.append(val_acc)
         test_acc_list.append(test_acc)
 
-        if epoch % args.weight_update_period == 0:
-            r = get_reward(args, model, device, val_loader, p)
-            print('reward:', r)
-            sampling_weight = sampling_weight*np.exp(2.0*(r+0.01/p))
-            p = (1 - 4 * p_min) * sampling_weight / sum(sampling_weight) + p_min
-            print('p:', p)
-            weight_history.append(p)
-            data_list, feature = node_sampling(p)
-            train_dataset, valid_dataset, test_dataset = random_split(data_list, frac_train=0.6, frac_valid=0.2,
-                                                                      frac_test=0.2, seed=args.seed)
-            train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
-                                      num_workers=args.num_workers,
-                                      collate_fn=partial(collator, feature=feature, shuffle=True,
-                                                         perturb=args.perturb_feature))
-            val_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False,
-                                    num_workers=args.num_workers,
-                                    collate_fn=partial(collator, feature=feature, shuffle=False))
-            test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False,
-                                     num_workers=args.num_workers,
-                                     collate_fn=partial(collator, feature=feature, shuffle=False))
 
     print('best validation acc: ', max(val_acc_list))
     print('best test acc: ', max(test_acc_list))

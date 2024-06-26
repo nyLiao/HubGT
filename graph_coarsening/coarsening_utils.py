@@ -376,7 +376,7 @@ def contract_variation_edges(G, A=None, K=10, r=0.5, algorithm='greedy'):
     
     # cost function for the edge 
     def subgraph_cost(G, A, edge):
-        edge, w = edge[:2].astype(np.int), edge[2]
+        edge, w = edge[:2].astype(np.int64), edge[2]
         deg_new = 2*deg[edge] - w
         L = np.array([[deg_new[0],-w], [-w,deg_new[1]]])
         B = Pibot @ A[edge,:]

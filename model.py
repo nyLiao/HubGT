@@ -182,7 +182,7 @@ class GT(nn.Module):
         self.num_heads = num_heads
         self.node_encoder = nn.Linear(input_dim, hidden_dim)
         self.input_dropout = nn.Dropout(intput_dropout_rate)
-        encoders = [MyEncoderLayer(hidden_dim, ffn_dim, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim)
+        encoders = [EncoderLayer(hidden_dim, ffn_dim, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim)
                     for _ in range(n_layers)]
         self.layers = nn.ModuleList(encoders)
         self.n_layers = n_layers
