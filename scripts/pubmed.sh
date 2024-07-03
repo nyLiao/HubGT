@@ -1,8 +1,8 @@
-[ -z "${exp_name}" ] && exp_name="fb100"
+[ -z "${exp_name}" ] && exp_name="PubMed"
 [ -z "${epoch}" ] && epoch="1000"
 [ -z "${seed}" ] && seed="2022"
 [ -z "${arch}" ] && arch="--ffn_dim 128 --hidden_dim 128 --dropout_rate 0.1 --n_layers 4 --peak_lr 2e-4 --K 32"
-[ -z "${batch_size}" ] && batch_size="128"
+[ -z "${batch_size}" ] && batch_size="32"
 [ -z "${data_augment}" ] && data_augment="8"
 
 max_epochs=$((epoch+1))
@@ -28,5 +28,4 @@ python main_adaptive.py --seed $seed --batch_size $batch_size \
       $arch \
       --checkpoint_path $default_root_dir\
       --num_data_augment $data_augment \
-      --device 0
-
+      --device 2

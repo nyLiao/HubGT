@@ -17,9 +17,8 @@ from graph_coarsening.coarsening_utils import coarsen
 from torch.nn.functional import normalize
 import torch_geometric.transforms as T
 from torch_geometric.utils.undirected import is_undirected, to_undirected
-from torch_sparse import coalesce
 from tqdm import tqdm
-from labeling import labeling
+from labeling import labeling, construct_index, generate_kspd, self_kspd_feature
 from datasets import load_nc_dataset
 
 
@@ -74,11 +73,12 @@ def coarse_adj_normalize(adj):
     return adj
 
 
-def process_data(name, use_coarsen_feature=True):
+def process_data(name, K=16, use_coarsen_feature=True):
     dataset = load_nc_dataset(dataname=name)
     edge_index = dataset.graph['edge_index']
     x = dataset.graph['node_feat']
     y = dataset.label.reshape(-1)
+    N = y.shape[0]
 
     subgraphs = labeling(edge_index)
     adj = sp.coo_matrix((np.ones(edge_index.shape[1]), (edge_index[0], edge_index[1])),
@@ -117,7 +117,8 @@ def process_data(name, use_coarsen_feature=True):
         C, Gc, _, _ = coarsen(G, K=10, r=0.9, method='algebraic_JC')
         print(f"Done! Time: {time.time() - start:.2f}s, Number of super nodes: {C.shape[0]}")
 
-        C = torch.tensor(C/C.sum(1), dtype=torch.float32)
+        C_norm = C / C.sum(1)
+        C = torch.tensor(C_norm, dtype=torch.float32)
         super_node_feature = torch.matmul(C, x)
         feature = torch.cat([x, super_node_feature])
         node_supernode_dict = {}
@@ -132,13 +133,17 @@ def process_data(name, use_coarsen_feature=True):
     else:
         feature = x
 
+    construct_index(name, edge_index, K)
+    feature = self_kspd_feature(feature, name, N, K)
     # Create subgraph samples
     print('creating subgraph samples...')
     data_list = []
+    queries = []
     for id in tqdm(range(y.shape[0])):
         sub_data_list = []
         s = eigen_adj[id].toarray()[0]
         s[id] = -1000.0
+        subgraph_nodes = np.array(list(subgraphs[id].keys()), dtype=int)
         top_neighbor_index = s.argsort()[-(k0+k1+k2):]
         if use_coarsen_feature:
             super_node_id = node_supernode_dict[id]
@@ -154,7 +159,6 @@ def process_data(name, use_coarsen_feature=True):
         for _ in range(Samples):
             if sample_num0 > 0:
                 sample_index0 = np.random.choice(a=np.arange(len(subgraphs[id])), size=sample_num0, replace=False)
-                subgraph_nodes = np.array(list(subgraphs[id].keys()), dtype=int)
                 sample_index0 = subgraph_nodes[sample_index0]
             else:
                 sample_index0 = np.array([], dtype=int)
@@ -183,18 +187,22 @@ def process_data(name, use_coarsen_feature=True):
                 attn_bias = torch.cat([attn_bias, attn_bias_complem2], dim=2)
 
                 label = torch.cat([y[node_feature_id], torch.zeros(len(super_node_list))]).long()
-                feature_id = torch.cat([node_feature_id, torch.tensor(super_node_list + y.shape[0], dtype=int)])
+                feature_id = torch.cat([node_feature_id, torch.tensor(super_node_list + N, dtype=int)])
                 assert len(feature_id) == k0+k1+k2+2
             else:
                 label = y[node_feature_id]
                 feature_id = node_feature_id
                 assert len(feature_id) == k0+k1+k2+1
+            
+            for v in node_feature_id:
+                queries.append((id, v.item()))
 
             attn_bias = attn_bias.permute(1, 2, 0)
             sub_data_list.append([attn_bias, feature_id, label])
 
         data_list.append(sub_data_list)
 
+    # generate_KSPD(name, queries, K)
     torch.save(data_list, './dataset/'+name+'/data.pt')
     torch.save(feature, './dataset/'+name+'/feature.pt')
     print('done!')
@@ -204,9 +212,7 @@ def process_data(name, use_coarsen_feature=True):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('name', type=str, default='Cora')
+    parser.add_argument('name', type=str)
+    parser.add_argument('--K', type=int, default=16, help='use top-K shortest path distance as feature')
     args = parser.parse_args()
-    process_data(args.name)
-
-
-
+    process_data(args.name, args.K)

@@ -1,7 +1,7 @@
 [ -z "${exp_name}" ] && exp_name="arxiv-year"
 [ -z "${epoch}" ] && epoch="300"
 [ -z "${seed}" ] && seed="2022"
-[ -z "${arch}" ] && arch="--ffn_dim 128 --hidden_dim 128 --dropout_rate 0.1 --n_layers 4 --peak_lr 2e-4 --num_global_node 4"
+[ -z "${arch}" ] && arch="--ffn_dim 128 --hidden_dim 128 --dropout_rate 0.1 --n_layers 4 --peak_lr 2e-4 --num_global_node 4 --K 32"
 [ -z "${batch_size}" ] && batch_size="1024"
 [ -z "${data_augment}" ] && data_augment="8"
 
@@ -28,4 +28,4 @@ python main_adaptive.py --seed $seed --batch_size $batch_size \
       $arch \
       --checkpoint_path $default_root_dir\
       --num_data_augment $data_augment \
-      --device 0
+      --device 1

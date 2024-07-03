@@ -75,7 +75,7 @@ class Batch():
         return self.y.size(0)
 
 
-def collator(items, feature, shuffle=False, perturb=False):
+def collator(items, feature, kspd, K, shuffle=False, perturb=False):
     batch_list = []
     for item in items:
         for x in item:
@@ -90,6 +90,19 @@ def collator(items, feature, shuffle=False, perturb=False):
     if perturb:
         x += torch.FloatTensor(x.shape).uniform_(-0.1, 0.1)
     attn_bias = torch.cat([i.unsqueeze(0) for i in attn_biases])
+
+    # top-k shortest path feature
+    # dis = []
+    # for subgraph in xs:
+    #     u = subgraph[0].item()
+    #     for v in subgraph:
+    #         v = v.item()
+    #         if (u, v) in kspd or (v, u) in kspd:
+    #             dis.append(kspd[(u, v)] if (u, v) in kspd else kspd[(v, u)])
+    #         else:
+    #             dis.append(torch.zeros((K, )))
+    # dis = torch.cat(dis).reshape(x.shape[0], x.shape[1], -1)
+    # x = torch.cat([x, dis], dim=-1)
 
     return Batch(
         attn_bias=attn_bias,

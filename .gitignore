@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 **/__pycache__/
+labeling/bin
 
 # Dataset
 /data/*
@@ -12,3 +13,4 @@ __pycache__/
 exps/*
 *.log
 *.out
+*.txt

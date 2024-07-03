@@ -4,9 +4,7 @@ from pygsp import graphs, filters, reduction
 import scipy as sp
 from scipy import sparse
 
-import matplotlib
 import matplotlib.pylab as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 from sortedcontainers import SortedList
 from graph_coarsening.graph_utils import *

@@ -16,6 +16,7 @@ from preprocess_data import process_data
 from torch.nn.functional import normalize
 import scipy.sparse as sp
 from numpy.linalg import inv
+from labeling import load_kspd
 
 
 def get_time():
@@ -179,16 +180,18 @@ def main():
     parser.add_argument('--device', type=int, default=0, help='which gpu to use if any (default: 0)')
     parser.add_argument('--perturb_feature', type=bool, default=False)
     parser.add_argument('--weight_update_period', type=int, default=10000, help='epochs to update the sampling weight')
+    parser.add_argument('--K', type=int, default=16, help='use top-K shortest path distance as feature')
     args = parser.parse_args()
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
 
     if not os.path.exists('./dataset/' + args.dataset_name):
-        data_list, feature, y = process_data(args.dataset_name)
+        data_list, feature, y = process_data(args.dataset_name, args.K)
     else:
         data_list = torch.load('./dataset/'+args.dataset_name+'/data.pt')
         feature = torch.load('./dataset/'+args.dataset_name+'/feature.pt')
         y = torch.load('./dataset/'+args.dataset_name+'/y.pt')
 
+    kspd = load_kspd('./dataset/' + args.dataset_name + f"/kspd_{args.K}.txt")
     if args.dataset_name in ['arxiv-year', 'snap-patents']:
         frac_train, frac_valid, frac_test = 0.5, 0.25, 0.25
     elif args.dataset_name in ['squirrel', 'chameleon', 'wisconsin']:
@@ -198,9 +201,9 @@ def main():
     train_dataset, test_dataset, valid_dataset = random_split(data_list, frac_train=frac_train, frac_valid=frac_valid, frac_test=frac_test, seed=args.seed)
     print('dataset load successfully')
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, shuffle=True, perturb=args.perturb_feature))
-    val_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, shuffle=False))
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, shuffle=False))
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, kspd=kspd, K=args.K, shuffle=True, perturb=args.perturb_feature))
+    val_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, kspd=kspd, K=args.K, shuffle=False))
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, kspd=kspd, K=args.K, shuffle=False))
     print(args)
 
     model = GT(
