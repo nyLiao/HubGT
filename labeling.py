@@ -82,7 +82,7 @@ def construct_index(name, edge_index, K):
     for i in range(edge_index.shape[1]):
         f.write(f"{edge_index[0][i].item()} {edge_index[1][i].item()}\n")
     f.close()
-    cmd = f"labeling/bin/construct_index {edge_path} {K} 0 {index_path}"
+    cmd = f"pll/bin/construct_index {edge_path} {K} 0 {index_path}"
     print('start landmark labeling...')
     start = time.time()
     subprocess.call(cmd, shell=True)
@@ -104,7 +104,7 @@ def generate_kspd(name, queries, K):
         vis[(u, v)] = True
     query_file.close()
 
-    cmd = f"labeling/bin/k_distance {K} {index_path} {kspd_path} < {query_path}"
+    cmd = f"pll/bin/k_distance {K} {index_path} {kspd_path} < {query_path}"
     print('start generate KSPD...')
     start = time.time()
     subprocess.call(cmd, shell=True)
@@ -135,7 +135,7 @@ def self_kspd_feature(feature, name, N, K):
         query_file.write(f"{i} {i}\n")
     query_file.close()
 
-    cmd = f"labeling/bin/k_distance {K} {index_path} {kspd_path} < {query_path}"
+    cmd = f"pll/bin/k_distance {K} {index_path} {kspd_path} < {query_path}"
     print('start generate KSPD...')
     start = time.time()
     subprocess.call(cmd, shell=True)
