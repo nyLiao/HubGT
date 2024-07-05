@@ -191,7 +191,8 @@ def main():
         feature = torch.load('./dataset/'+args.dataset_name+'/feature.pt')
         y = torch.load('./dataset/'+args.dataset_name+'/y.pt')
 
-    kspd = load_kspd('./dataset/' + args.dataset_name + f"/kspd_{args.K}.txt")
+    # kspd = load_kspd('./dataset/' + args.dataset_name + f"/kspd_{args.K}.txt")
+    kspd = None
     if args.dataset_name in ['arxiv-year', 'snap-patents']:
         frac_train, frac_valid, frac_test = 0.5, 0.25, 0.25
     elif args.dataset_name in ['squirrel', 'chameleon', 'wisconsin']:

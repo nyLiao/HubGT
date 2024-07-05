@@ -1,7 +1,7 @@
 [ -z "${exp_name}" ] && exp_name="Cora"
 [ -z "${epoch}" ] && epoch="1000"
 [ -z "${seed}" ] && seed="2022"
-[ -z "${arch}" ] && arch="--ffn_dim 128 --hidden_dim 128 --dropout_rate 0.1 --n_layers 4 --peak_lr 2e-4"
+[ -z "${arch}" ] && arch="--ffn_dim 128 --hidden_dim 128 --dropout_rate 0.5 --n_layers 4 --peak_lr 2e-4 --K 32"
 [ -z "${batch_size}" ] && batch_size="32"
 [ -z "${data_augment}" ] && data_augment="8"
 
