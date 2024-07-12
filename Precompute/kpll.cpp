@@ -59,16 +59,14 @@ ReAllocDistArray(size_t i, size_t nmemb){
 }
 
 bool TopKPrunedLandmarkLabeling::
-ConstructIndex(const vector<pair<int, int> > &es, size_t K, bool directed){
+ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K, bool directed){
   Free();
 
   this->V = 0;
   this->K = K;
   this->directed = directed;
-
-  for (size_t i = 0; i < es.size(); i++){
-    V = std::max(V, (size_t)std::max(es[i].first, es[i].second) + 1);
-  }
+  V = std::max(*max_element(ns.begin(), ns.end()), *max_element(nt.begin(), nt.end())) + 1;
+  cout << "Nodes: " << V << ", Edges: " << ns.size() << ", K: " << K << ", Directed: " << directed << endl;
 
   for (int dir = 0; dir < 1 + directed; dir++){
     graph[dir].resize(V);
@@ -76,27 +74,31 @@ ConstructIndex(const vector<pair<int, int> > &es, size_t K, bool directed){
 
   // renaming
   {
-    vector<std::pair<int, int> > deg(V, std::make_pair(0, 0));
+    vector<std::pair<uint32_t, uint32_t> > deg(V, std::make_pair(0, 0));
 
     for (size_t i = 0; i < V; i++) deg[i].second = i;
 
-    for (size_t i = 0; i < es.size(); i++){
-      deg[es[i].first ].first++;
-      deg[es[i].second].first++;
+    for (size_t i = 0; i < ns.size(); i++){
+      deg[ns[i]].first++;
+      deg[nt[i]].first++;
     }
 
-    sort(deg.begin(), deg.end(), greater<pair<int, int> >());
+    sort(deg.begin(), deg.end(), greater<pair<uint32_t, uint32_t> >());
     alias.resize(V);
+    alias_inv.resize(V);
 
-    for (size_t i = 0; i < V; i++) alias[deg[i].second] = i;
+    for (size_t i = 0; i < V; i++) {
+      alias[deg[i].second] = i;
+      alias_inv[i] = deg[i].second;
+    }
 
-    for (size_t i = 0; i < es.size(); i++){
-      graph[0][alias[es[i].first]].push_back(alias[es[i].second]);
+    for (size_t i = 0; i < ns.size(); i++){
+      graph[0][alias[ns[i]]].push_back(alias[nt[i]]);
 
       if (directed){
-        graph[1][alias[es[i].second]].push_back(alias[es[i].first]);
+        graph[1][alias[nt[i]]].push_back(alias[ns[i]]);
       } else {
-        graph[0][alias[es[i].second]].push_back(alias[es[i].first]);
+        graph[0][alias[nt[i]]].push_back(alias[ns[i]]);
       }
     }
   }
@@ -169,6 +171,22 @@ KDistanceQuery(int s, int t, uint8_t k, vector<int> &ret){
   }
 
   return ret.size() < k ? INT_MAX : 0;
+}
+
+int TopKPrunedLandmarkLabeling::
+Label(int v, vector<int> &pos, vector<int> &dist){
+  pos.clear();
+  dist.clear();
+
+  const index_t &idv = index[directed][alias[v]];
+
+  uint32_t *lb = idv.label;
+  for (size_t i = 0; lb[i] != V; i++){
+    pos.push_back(alias_inv[lb[i]]);
+    dist.push_back(idv.offset[i]);
+  }
+
+  return pos.size();
 }
 
 size_t TopKPrunedLandmarkLabeling::
@@ -248,6 +266,7 @@ Free(){
   directed = false;
 
   alias.clear();
+  alias_inv.clear();
   loop_count.clear();
 
   for (int i = 0; i < 2; i++){
@@ -308,6 +327,7 @@ Labeling(){
   }
   indexing_time += GetCurrentTimeSec();
 
+  cout << "Loop count time: " << loop_count_time << ", Indexing time: " << indexing_time << endl;
   return status;
 }
 
@@ -429,6 +449,7 @@ PrunedBfs(uint32_t s, bool rev, bool &status){
     }
 
     if (node_que[next].empty()) break;
+    // if (dist > 2*K) break;
     swap(curr, next);
     dist++;
   }
@@ -563,164 +584,4 @@ ExtendLabel(uint32_t v, uint32_t start, uint8_t dist, uint8_t count, bool dir){
     idv.GetDistArray(last)[new_size-1] = INF8;
   }
   idv.GetDistArray(last)[new_size - 2] += count;
-}
-
-
-bool TopKPrunedLandmarkLabeling::StoreIndex(ofstream &ofs){
-#define WRITE_BINARY(value) (ofs.write((const char*)&(value), sizeof(value)))
-
-  // number of vertices V, parameter K
-  WRITE_BINARY(V);
-  WRITE_BINARY(K);
-  WRITE_BINARY(directed);
-
-  // mapping  between id in original graph and constructed index
-  for (size_t v = 0; v < V; v++){
-    WRITE_BINARY(alias[v]);
-  }
-
-  // loop count index
-  for (size_t v = 0; v < V; v++){
-    size_t length = loop_count[v].size();
-    WRITE_BINARY(length);
-    for (size_t i = 0; i < loop_count[v].size(); i++){
-      WRITE_BINARY(loop_count[v][i]);
-    }
-  }
-
-  for (int dir = 0; dir < 1 + directed; dir++){
-    for (size_t v = 0; v <  V; v++){
-      const index_t &idv = index[dir][v];
-
-      assert(idv.length > 0);
-      WRITE_BINARY(idv.length);
-
-      assert(idv.label[idv.length] == V);
-      for (size_t i = 0; i < idv.length; i++){
-        WRITE_BINARY(idv.label[i]);
-      }
-
-      for (size_t i = 0; i < idv.length; i++){
-        WRITE_BINARY(idv.offset[i]);
-      }
-
-      for (size_t i = 0; idv.label[i] != V;){
-        dist_array_t da = idv.d_array[i / dist_array_t::size];
-
-        size_t ni = i;
-        size_t offset = 0;
-        while (ni < i + dist_array_t::size && idv.label[ni] != V){
-          size_t j = 0;
-          do {
-            WRITE_BINARY(idv.GetDistArray(ni)[j]);
-            offset++;
-          } while (idv.GetDistArray(ni)[j++] != INF8);
-          assert(offset == da.offset[ni & dist_array_t::mask]);
-
-          ni++;
-        }
-        i = ni;
-      }
-    }
-  }
-  return ofs.good();
-}
-
-bool TopKPrunedLandmarkLabeling::StoreIndex(const char *file){
-  ofstream ofs(file);
-  bool status = StoreIndex(ofs);
-  ofs.close();
-  return status;
-}
-
-bool TopKPrunedLandmarkLabeling::LoadIndex(ifstream &ifs){
-  Free();
-
-#define READ_BINARY(value) (ifs.read((char*)&(value), sizeof(value)))
-  READ_BINARY(V);
-  READ_BINARY(K);
-  READ_BINARY(directed);
-
-  loop_count_time = 0;
-  indexing_time   = 0;
-  alias.resize(V);
-
-  for (size_t v = 0; v < V; v++){
-    READ_BINARY(alias[v]);
-  }
-
-  loop_count.resize(V);
-  for (size_t v = 0; v < V; v++){
-
-    size_t length;
-    READ_BINARY(length);
-
-    loop_count[v].resize(length);
-    for (size_t i = 0; i < length; i++){
-      READ_BINARY(loop_count[v][i]);
-    }
-  }
-
-  for (int dir = 0; dir < 1 + directed; dir++){
-    index[dir] = (index_t *)malloc(V * sizeof(index_t));
-
-    for (size_t v = 0; v < V; v++){
-      index_t &idv = index[dir][v];
-      uint32_t length;
-      READ_BINARY(length);
-
-      assert(length > 0);
-      idv.length = length;
-      idv.label  = (uint32_t *) malloc(sizeof(uint32_t) * length + 1);
-      idv.offset = (uint8_t *) malloc(sizeof(uint8_t) * length);
-      idv.label[length] = V;
-
-      for (size_t i = 0; i < length; i++){
-        READ_BINARY(idv.label[i]);
-      }
-
-      for (size_t i = 0; i < length; i++){
-        READ_BINARY(idv.offset[i]);
-      }
-
-      size_t num_da = (length + dist_array_t::size - 1) /dist_array_t::size;
-      idv.d_array = (dist_array_t *)malloc(num_da * sizeof(dist_array_t));
-
-      for (size_t i = 0; idv.label[i] != V;){
-        dist_array_t &da = idv.d_array[i / dist_array_t::size];
-
-        vector<uint8_t> d_count;
-
-        size_t ni = i;
-        while (ni < i + dist_array_t::size && idv.label[ni] != V){
-          uint8_t count = 0;
-
-          do {
-            READ_BINARY(count);
-            d_count.push_back(count);
-          } while(count != INF8);
-          da.offset[ni - i] = d_count.size();
-          ni++;
-        }
-
-        da.addr = (uint8_t *)malloc(d_count.size() * sizeof(uint8_t));
-
-        for (size_t j = 0; j < d_count.size(); j++){
-          da.addr[j] = d_count[j];
-        }
-        i = ni;
-      }
-    }
-  }
-  return ifs.good();
-}
-
-
-bool TopKPrunedLandmarkLabeling::LoadIndex(const char *file){
-  ifstream ifs(file);
-  if (!ifs.good()) return false;
-
-  bool status = LoadIndex(ifs);
-  ifs.close();
-  return status;
 }

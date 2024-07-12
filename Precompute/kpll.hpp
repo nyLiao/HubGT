@@ -42,11 +42,8 @@ public:
   int KDistanceQuery(int s, int t, uint8_t k);
   int KDistanceQuery(int s, int t){ return KDistanceQuery(s, t, K); }
 
-  bool   ConstructIndex(const std::vector<std::pair<int, int> > &es, size_t K, bool directed);
-  bool   StoreIndex(std::ofstream &ofs);
-  bool   StoreIndex(const char *file);
-  bool   LoadIndex(std::ifstream &ifs);
-  bool   LoadIndex(const char *file);
+  bool ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t K, bool directed);
+  int Label(int v, std::vector<int> &pos, std::vector<int> &dist);
 
   double IndexingTime()  const { return indexing_time; }
   double LoopCountTime() const { return loop_count_time; }
@@ -65,6 +62,7 @@ private:
   double indexing_time;
 
   std::vector<uint32_t> alias;
+  std::vector<uint32_t> alias_inv;
   std::vector<std::vector<uint32_t> > graph[2];
   std::vector<std::vector<uint8_t> > loop_count;
   // index[0] corresponds to L_in. index[1] corresponds to L_out
