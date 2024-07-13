@@ -155,14 +155,19 @@ def random_split(data_list, frac_train, frac_valid, frac_test, seed):
 
 def main():
     parser = argparse.ArgumentParser(description='PyTorch implementation of graph transformer')
-    parser.add_argument('--dataset_name', type=str, default='cora')
+    parser.add_argument('-s', '--seed', type=int, default=42, help='random seed')
+    parser.add_argument('-d', '--data', type=str, default='cora', help='Dataset name')
+    parser.add_argument('--data_split', type=str, default='60/20/20', help='Index or percentage of dataset split')
+    parser.add_argument('--normg', type=float, default=0.5, help='Generalized graph norm')
+    parser.add_argument('--normf', type=int, nargs='?', default=0, const=None, help='Embedding norm dimension. 0: feat-wise, 1: node-wise, None: disable')
+    parser.add_argument('--multi', action='store_true', help='True for multi-label classification')
     parser.add_argument('--n_layers', type=int, default=4)
     parser.add_argument('--num_heads', type=int, default=8)
     parser.add_argument('--hidden_dim', type=int, default=128)
     parser.add_argument('--ffn_dim', type=int, default=128)
     parser.add_argument('--attn_bias_dim', type=int, default=6)
     parser.add_argument('--intput_dropout_rate', type=float, default=0.1)
-    parser.add_argument('--dropout_rate', type=float, default=0.3)
+    parser.add_argument('--dropout_rate', type=float, default=0.5)
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--attention_dropout_rate', type=float, default=0.5)
     parser.add_argument('--checkpoint_path', type=str, default='')
@@ -175,7 +180,6 @@ def main():
     parser.add_argument('--num_data_augment', type=int, default=8)
     parser.add_argument('--num_global_node', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--num_workers', type=int, default=4, help='number of workers for dataset loading')
     parser.add_argument('--device', type=int, default=0, help='which gpu to use if any (default: 0)')
     parser.add_argument('--perturb_feature', type=bool, default=False)
@@ -184,18 +188,12 @@ def main():
     args = parser.parse_args()
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
 
-    if not os.path.exists('./dataset/' + args.dataset_name):
-        data_list, feature, y = process_data(args.dataset_name, args.K)
-    else:
-        data_list = torch.load('./dataset/'+args.dataset_name+'/data.pt')
-        feature = torch.load('./dataset/'+args.dataset_name+'/feature.pt')
-        y = torch.load('./dataset/'+args.dataset_name+'/y.pt')
+    data_list, feature, y = process_data(args)
 
-    # kspd = load_kspd('./dataset/' + args.dataset_name + f"/kspd_{args.K}.txt")
     kspd = None
-    if args.dataset_name in ['arxiv-year', 'snap-patents']:
+    if args.data in ['arxiv-year', 'snap-patents']:
         frac_train, frac_valid, frac_test = 0.5, 0.25, 0.25
-    elif args.dataset_name in ['squirrel', 'chameleon', 'wisconsin']:
+    elif args.data in ['squirrel', 'chameleon', 'wisconsin']:
         frac_train, frac_valid, frac_test = 0.48, 0.32, 0.20
     else:
         frac_train, frac_valid, frac_test = 0.6, 0.2, 0.2

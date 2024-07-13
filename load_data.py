@@ -46,7 +46,9 @@ class SingleGraphLoader(object):
         self.transform = T.Compose([
             T.RemoveIsolatedNodes(),
             T.RemoveDuplicatedEdges(reduce='mean'),
-            T.NormalizeFeatures(),])
+            T.NormalizeFeatures(),
+            T.ToSparseTensor(remove_edge_index=False, layout=torch.sparse_csr),
+        ])
         self.num_features = None
         self.num_classes = None
 
@@ -237,7 +239,7 @@ class SingleGraphLoader(object):
         """
         self.logger.debug('-'*20 + f" Loading data: {self} " + '-'*20)
 
-        self._T_insert(GenNorm(left=args.normg))
+        self._T_insert(GenNorm(left=args.normg), index=-2)
         module_name, class_name, kwargs, metric = self._resolve_import(args)
 
         dataset = load_import(class_name, module_name)(**kwargs)

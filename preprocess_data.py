@@ -11,15 +11,14 @@ from torch.utils.data import DataLoader
 from functools import partial
 import scipy.sparse as sp
 from numpy.linalg import inv
-from torch_geometric.datasets import Planetoid, Amazon
 from pygsp import graphs
 from graph_coarsening.coarsening_utils import coarsen
 from torch.nn.functional import normalize
 import torch_geometric.transforms as T
 from torch_geometric.utils.undirected import is_undirected, to_undirected
 from tqdm import tqdm
-from labeling import labeling, construct_index, generate_kspd, self_kspd_feature
-from datasets import load_nc_dataset
+from load_data import SingleGraphLoader
+from Precompute import PyPLL
 
 
 def adj_normalize(mx):
@@ -73,24 +72,19 @@ def coarse_adj_normalize(adj):
     return adj
 
 
-def process_data(name, K=16, use_coarsen_feature=True):
-    dataset = load_nc_dataset(dataname=name)
-    edge_index = dataset.graph['edge_index']
-    x = dataset.graph['node_feat']
-    y = dataset.label.reshape(-1)
+def process_data(args, use_coarsen_feature=True):
+    data_loader = SingleGraphLoader(args)
+    data, metric = data_loader(args)
+    edge_index = data.edge_index
+    x = data.x
+    y = data.y.reshape(-1)
     N = y.shape[0]
 
-    subgraphs = labeling(edge_index)
     adj = sp.coo_matrix((np.ones(edge_index.shape[1]), (edge_index[0], edge_index[1])),
                                 shape=(y.shape[0], y.shape[0]),
                                 dtype=np.float32)
     normalized_adj = adj_normalize(adj)
-    column_normalized_adj = column_normalize(adj)
 
-    if not os.path.exists('./dataset/' + name):
-        os.makedirs('./dataset/' + name)
-    sp.save_npz('./dataset/'+name+'/normalized_adj.npz', normalized_adj)
-    sp.save_npz('./dataset/' + name + '/column_normalized_adj.npz', column_normalized_adj)
     c = 0.15
     k0 = 15
     k1 = 15
@@ -99,10 +93,6 @@ def process_data(name, K=16, use_coarsen_feature=True):
     power_adj_list = [normalized_adj]
     for m in range(5):
         power_adj_list.append(power_adj_list[0]*power_adj_list[m])
-
-    torch.save(x, './dataset/' + name + '/x.pt')
-    torch.save(y, './dataset/' + name + '/y.pt')
-    torch.save(edge_index, './dataset/' + name + '/edge_index.pt')
 
     # Sampling heuristics: 0,1,2,3
     eigen_adj = sp.eye(adj.shape[0])
@@ -118,7 +108,7 @@ def process_data(name, K=16, use_coarsen_feature=True):
         print(f"Done! Time: {time.time() - start:.2f}s, Number of super nodes: {C.shape[0]}")
 
         C_norm = C / C.sum(1)
-        C = torch.tensor(C_norm, dtype=torch.float32)
+        C = torch.tensor(C_norm.astype(np.float32).todense())
         super_node_feature = torch.matmul(C, x)
         feature = torch.cat([x, super_node_feature])
         node_supernode_dict = {}
@@ -133,8 +123,22 @@ def process_data(name, K=16, use_coarsen_feature=True):
     else:
         feature = x
 
-    construct_index(name, edge_index, K)
-    feature = self_kspd_feature(feature, name, N, K)
+    py_pll = PyPLL()
+    undirected = is_undirected(data.edge_index)
+    edge_index = data.edge_index.numpy().astype(np.uint32)
+    t_pre = py_pll.construct_index(edge_index, args.K, not undirected)
+    del edge_index
+    subgraphs = {}
+    feat_kspd = torch.zeros(feature.shape[0], args.K, dtype=torch.float32)
+    for i in range(N):
+        nodes, dist, length = py_pll.label(i)
+        nodes, dist = np.array(nodes), np.array(dist)
+        mask = (dist >= 2)
+        subgraphs[i] = dict(zip(nodes[mask], dist[mask]))
+        feati = py_pll.k_distance_query(i, i, args.K)
+        feat_kspd[i] = torch.tensor(feati, dtype=torch.float32)
+
+    feature = torch.cat([feature, feat_kspd], dim=1)
     # Create subgraph samples
     print('creating subgraph samples...')
     data_list = []
@@ -193,7 +197,7 @@ def process_data(name, K=16, use_coarsen_feature=True):
                 label = y[node_feature_id]
                 feature_id = node_feature_id
                 assert len(feature_id) == k0+k1+k2+1
-            
+
             for v in node_feature_id:
                 queries.append((id, v.item()))
 
@@ -202,17 +206,18 @@ def process_data(name, K=16, use_coarsen_feature=True):
 
         data_list.append(sub_data_list)
 
-    # generate_KSPD(name, queries, K)
-    torch.save(data_list, './dataset/'+name+'/data.pt')
-    torch.save(feature, './dataset/'+name+'/feature.pt')
     print('done!')
-
     return data_list, feature, y
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('name', type=str)
-    parser.add_argument('--K', type=int, default=16, help='use top-K shortest path distance as feature')
+    parser.add_argument('-s', '--seed', type=int, default=42, help='random seed')
+    parser.add_argument('-v', '--dev', type=int, default=0, help='GPU id')
+    parser.add_argument('-d', '--data', type=str, default='cora', help='Dataset name')
+    parser.add_argument('--data_split', type=str, default='60/20/20', help='Index or percentage of dataset split')
+    parser.add_argument('--normg', type=float, default=0.5, help='Generalized graph norm')
+    parser.add_argument('--normf', type=int, nargs='?', default=0, const=None, help='Embedding norm dimension. 0: feat-wise, 1: node-wise, None: disable')
+    parser.add_argument('-K', type=int, default=8, help='use top-K shortest path distance as feature')
     args = parser.parse_args()
-    process_data(args.name, args.K)
+    process_data(args)
