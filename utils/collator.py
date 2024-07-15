@@ -75,7 +75,7 @@ class Batch():
         return self.y.size(0)
 
 
-def collator(items, feature, kspd, K, shuffle=False, perturb=False):
+def collator(items, feature, shuffle=False, perturb=False):
     batch_list = []
     for item in items:
         for x in item:
@@ -110,4 +110,3 @@ def collator(items, feature, kspd, K, shuffle=False, perturb=False):
         y=y,
         ids=ids,
     )
-

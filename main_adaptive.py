@@ -1,22 +1,22 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from collator import collator
 import random
 import numpy as np
 from torch.utils.data import DataLoader
 from functools import partial
-from model import GT
-from lr import PolynomialDecayLR
 import os
 import time
 import argparse
 from tqdm import tqdm
-from preprocess_data import process_data
 from torch.nn.functional import normalize
 import scipy.sparse as sp
 from numpy.linalg import inv
-from labeling import load_kspd
+
+from model import GT
+from preprocess_data import process_data
+from utils.collator import collator
+from utils.lr import PolynomialDecayLR
 
 
 def get_time():
@@ -181,7 +181,7 @@ def main():
     parser.add_argument('--num_global_node', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4, help='number of workers for dataset loading')
-    parser.add_argument('--device', type=int, default=0, help='which gpu to use if any (default: 0)')
+    parser.add_argument('-v', '--device', type=int, default=0, help='which gpu to use if any (default: 0)')
     parser.add_argument('--perturb_feature', type=bool, default=False)
     parser.add_argument('--weight_update_period', type=int, default=10000, help='epochs to update the sampling weight')
     parser.add_argument('--K', type=int, default=16, help='use top-K shortest path distance as feature')
@@ -190,7 +190,6 @@ def main():
 
     data_list, feature, y = process_data(args)
 
-    kspd = None
     if args.data in ['arxiv-year', 'snap-patents']:
         frac_train, frac_valid, frac_test = 0.5, 0.25, 0.25
     elif args.data in ['squirrel', 'chameleon', 'wisconsin']:
@@ -200,9 +199,9 @@ def main():
     train_dataset, test_dataset, valid_dataset = random_split(data_list, frac_train=frac_train, frac_valid=frac_valid, frac_test=frac_test, seed=args.seed)
     print('dataset load successfully')
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, kspd=kspd, K=args.K, shuffle=True, perturb=args.perturb_feature))
-    val_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, kspd=kspd, K=args.K, shuffle=False))
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, kspd=kspd, K=args.K, shuffle=False))
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, shuffle=True, perturb=args.perturb_feature))
+    val_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, shuffle=False))
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers, collate_fn=partial(collator, feature=feature, shuffle=False))
     print(args)
 
     model = GT(
@@ -233,10 +232,6 @@ def main():
             power=1.0)
 
     val_acc_list, test_acc_list = [], []
-    sampling_weight = np.ones(4)
-    weight_history = []
-    p_min = 0.05
-    p = (1 - 4 * p_min) * sampling_weight / sum(sampling_weight) + p_min
 
     for epoch in range(1, args.epochs+1):
         train(args, model, device, train_loader, optimizer, lr_scheduler)
@@ -265,9 +260,6 @@ def main():
     print('best validation acc: ', max(val_acc_list))
     print('best test acc: ', max(test_acc_list))
     print('best acc: ', test_acc_list[val_acc_list.index(max(val_acc_list))])
-    np.save('./exps/'+args.dataset_name+'/weight_history', np.array(weight_history))
-    np.save('./exps/' + args.dataset_name + '/test_acc_list', np.array(test_acc_list))
-    np.save('./exps/' + args.dataset_name + '/val_acc_list', np.array(val_acc_list))
 
 
 if __name__ == "__main__":

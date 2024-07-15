@@ -80,6 +80,7 @@ def process_data(args, use_coarsen_feature=True):
     y = data.y.reshape(-1)
     N = y.shape[0]
 
+    start = time.time()
     adj = sp.coo_matrix((np.ones(edge_index.shape[1]), (edge_index[0], edge_index[1])),
                                 shape=(y.shape[0], y.shape[0]),
                                 dtype=np.float32)
@@ -89,7 +90,7 @@ def process_data(args, use_coarsen_feature=True):
     k0 = 15
     k1 = 15
     k2 = 0
-    Samples = 8 # sampled subgraphs for each node
+    Samples = args.num_data_augment # sampled subgraphs for each node
     power_adj_list = [normalized_adj]
     for m in range(5):
         power_adj_list.append(power_adj_list[0]*power_adj_list[m])
@@ -99,6 +100,7 @@ def process_data(args, use_coarsen_feature=True):
     for _ in range(5):
         eigen_adj = c * sp.eye(adj.shape[0]) + (1-c) * normalized_adj * eigen_adj
     eigen_adj = eigen_adj.tocsr()
+    print(f"Adj time: {time.time()-start:.2f}s")
 
     if use_coarsen_feature:
         print('Coarsening Graph...')
@@ -219,5 +221,6 @@ if __name__ == '__main__':
     parser.add_argument('--normg', type=float, default=0.5, help='Generalized graph norm')
     parser.add_argument('--normf', type=int, nargs='?', default=0, const=None, help='Embedding norm dimension. 0: feat-wise, 1: node-wise, None: disable')
     parser.add_argument('-K', type=int, default=8, help='use top-K shortest path distance as feature')
+    parser.add_argument('--num_data_augment', type=int, default=8)
     args = parser.parse_args()
     process_data(args)
