@@ -182,8 +182,78 @@ Label(int v, vector<int> &pos, vector<int> &dist){
 
   uint32_t *lb = idv.label;
   for (size_t i = 0; lb[i] != V; i++){
+    if (lb[i] == alias[v]) continue;
     pos.push_back(alias_inv[lb[i]]);
     dist.push_back(idv.offset[i]);
+  }
+
+  return pos.size();
+}
+
+int TopKPrunedLandmarkLabeling::
+SNeighbor(int v, int size, vector<int> &pos, vector<int> &dist){
+  pos.clear();
+  dist.clear();
+
+  const vector<vector<uint32_t> > &fgraph = graph[directed];
+  std::queue<uint32_t> node_que, dist_que;
+  std::vector<bool> updated(V, false);
+  int d_last = 0;
+  node_que.push(alias[v]);
+  dist_que.push(0);
+  updated[alias[v]] = true;
+
+  while (!node_que.empty()){
+    uint32_t u = node_que.front();
+    uint8_t  d = dist_que.front();
+    node_que.pop();
+    dist_que.pop();
+    // Exit condition for every hop
+    if (d > d_last && pos.size() >= size) break;
+    d_last = d;
+
+    for (size_t i = 0; i < fgraph[u].size(); i++){
+      if (updated[fgraph[u][i]]) continue;
+      node_que.push(fgraph[u][i]);
+      dist_que.push(d + 1);
+      pos.push_back(alias_inv[fgraph[u][i]]);
+      dist.push_back(d + 1);
+      updated[fgraph[u][i]] = true;
+    }
+  }
+
+  return pos.size();
+}
+
+int TopKPrunedLandmarkLabeling::
+SPush(int v, int size, float alpha, vector<int> &pos, vector<float> &dist){
+  pos.clear();
+  dist.clear();
+
+  const vector<vector<uint32_t> > &fgraph = graph[directed];
+  std::queue<uint32_t> node_que;
+  std::queue<float>    dist_que;
+  std::vector<bool> updated(V, false);
+  int count = 0;
+  node_que.push(alias[v]);
+  dist_que.push(1.0);
+  updated[alias[v]] = true;
+
+  while (!node_que.empty()){
+    uint32_t u = node_que.front();
+    uint8_t  d = dist_que.front();
+    node_que.pop();
+    dist_que.pop();
+    if (count >= size) break;
+
+    for (size_t i = 0; i < fgraph[u].size(); i++){
+      if (!updated[fgraph[u][i]]) count++;
+      node_que.push(fgraph[u][i]);
+      dist_que.push(d * alpha);
+      pos.push_back(alias_inv[fgraph[u][i]]);
+      dist.push_back(d * (1 - alpha) / fgraph[u].size());
+      updated[fgraph[u][i]] = true;
+    }
   }
 
   return pos.size();

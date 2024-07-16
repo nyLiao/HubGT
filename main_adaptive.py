@@ -19,8 +19,8 @@ from utils.collator import collator
 from utils.lr import PolynomialDecayLR
 
 
-def get_time():
-    torch.cuda.synchronize()
+def get_time(device=None):
+    torch.cuda.synchronize(device=device)
     return time.time()
 
 
@@ -85,54 +85,6 @@ def eval(args, model, device, loader):
     return acc, np.mean(loss_list)
 
 
-def get_reward(args, model, device, loader, p):
-    column_normalized_adj = sp.load_npz('./dataset/' + args.dataset_name + '/column_normalized_adj.npz')
-    normalized_adj = sp.load_npz('./dataset/'+args.dataset_name+'/normalized_adj.npz')
-    data_x = torch.load('./dataset/' + args.dataset_name + '/x.pt')
-    normalized_adj1 = normalized_adj*normalized_adj
-    eigen_adj = 0.15 * inv((sp.eye(normalized_adj.shape[0]) - (1 - 0.15) * column_normalized_adj).toarray())
-    eigen_adj1 = normalized_adj.toarray()
-    eigen_adj2 = normalized_adj1.toarray()
-    x = normalize(data_x, dim=1)
-    eigen_adj3 = np.array(torch.matmul(x, x.transpose(1, 0)))
-    r = [[], [], [], []]
-    reward = np.zeros(4)
-    model.eval()
-    n_node = 10
-    for step, batch in enumerate(tqdm(loader, desc="Iteration")):
-        batch = batch.to(device)
-        with torch.no_grad():
-            scores = model(batch, get_score=True)
-        scores = scores[:, 1:n_node]
-        for i, score in enumerate(torch.split(scores, args.num_data_augment, dim=0)):
-            ids = batch.ids[i*args.num_data_augment:(i+1)*args.num_data_augment]
-            id = ids[0, 0].cpu().item()
-            ids = ids[:, 1:n_node]
-            s = eigen_adj[id]
-            s1 = eigen_adj1[id]
-            s2 = eigen_adj2[id]
-            s3 = eigen_adj3[id]
-            s[id], s1[id], s2[id], s3[id] = 0, 0, 0, 0
-            s = torch.tensor(np.maximum(s, 0)).to(device)
-            s = s/(s.sum()+1e-5)
-            s1 = torch.tensor(np.maximum(s1, 0)).to(device)
-            s1 = s1/(s1.sum()+1e-5)
-            s2 = torch.tensor(np.maximum(s2, 0)).to(device)
-            s2 = s2/(s2.sum()+1e-5)
-            s3 = torch.tensor(np.maximum(s3, 0)).to(device)
-            s3 = s3 / (s3.sum() + 1e-5)
-            phi = p[0]*s + p[1]*s1 + p[2]*s2 + p[3]*s3 + 1e-5
-            r[0].append(torch.sum(score * s[ids] / phi[ids]) / args.num_data_augment)
-            r[1].append(torch.sum(score * s1[ids] / phi[ids]) / args.num_data_augment)
-            r[2].append(torch.sum(score * s2[ids] / phi[ids]) / args.num_data_augment)
-            r[3].append(torch.sum(score * s3[ids] / phi[ids]) / args.num_data_augment)
-    reward[0] = torch.mean(torch.cat([i.unsqueeze(0) for i in r[0]])).cpu().numpy()
-    reward[1] = torch.mean(torch.cat([i.unsqueeze(0) for i in r[1]])).cpu().numpy()
-    reward[2] = torch.mean(torch.cat([i.unsqueeze(0) for i in r[2]])).cpu().numpy()
-    reward[3] = torch.mean(torch.cat([i.unsqueeze(0) for i in r[3]])).cpu().numpy()
-    return reward
-
-
 def random_split(data_list, frac_train, frac_valid, frac_test, seed):
     np.testing.assert_almost_equal(frac_train + frac_valid + frac_test, 1.0)
     random.seed(seed)
@@ -181,7 +133,7 @@ def main():
     parser.add_argument('--num_global_node', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4, help='number of workers for dataset loading')
-    parser.add_argument('-v', '--device', type=int, default=0, help='which gpu to use if any (default: 0)')
+    parser.add_argument('-v', '--device', type=int, default=3, help='which gpu to use if any (default: 0)')
     parser.add_argument('--perturb_feature', type=bool, default=False)
     parser.add_argument('--weight_update_period', type=int, default=10000, help='epochs to update the sampling weight')
     parser.add_argument('--K', type=int, default=16, help='use top-K shortest path distance as feature')
@@ -189,6 +141,12 @@ def main():
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
 
     data_list, feature, y = process_data(args)
+    # if not os.path.exists('./dataset/' + args.data):
+    #     data_list, feature, y = process_data(args)
+    # else:
+    #     data_list = torch.load('./dataset/'+args.data+'/data.pt')
+    #     feature = torch.load('./dataset/'+args.data+'/feature.pt')
+    #     y = torch.load('./dataset/'+args.data+'/y.pt')
 
     if args.data in ['arxiv-year', 'snap-patents']:
         frac_train, frac_valid, frac_test = 0.5, 0.25, 0.25
@@ -221,6 +179,7 @@ def main():
         print(model)
     print('Total params:', sum(p.numel() for p in model.parameters()))
     model.to(device)
+    print('device:', device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.peak_lr, weight_decay=args.weight_decay)
     lr_scheduler = PolynomialDecayLR(
@@ -231,36 +190,30 @@ def main():
             end_lr=args.end_lr,
             power=1.0)
 
-    val_acc_list, test_acc_list = [], []
+    val_acc_list = []
 
     for epoch in range(1, args.epochs+1):
         train(args, model, device, train_loader, optimizer, lr_scheduler)
         lr_scheduler.step()
 
-        start = get_time()
+        start = get_time(device)
         train_acc, train_loss = eval_train(args, model, device, train_loader)
-        epoch_time = get_time() - start
+        epoch_time = get_time(device) - start
 
         val_acc, val_loss = eval(args, model, device, val_loader)
-        test_acc, test_loss = eval(args, model, device, test_loader)
 
         print_str = f'Epoch: {epoch:02d}, ' + \
                     f'train_loss: {train_loss:.4f}, ' + \
                     f'train_acc: {train_acc * 100:.2f}%, ' + \
                     f'val_loss: {val_loss:.2f}, ' + \
                     f'val_acc: {val_acc * 100:.2f}%, ' + \
-                    f'test_loss: {test_loss:.2f}, ' + \
-                    f'test_acc: {test_acc * 100:.2f}%, ' + \
                     f'Time: {epoch_time:.2f}s'
         print(print_str)
         val_acc_list.append(val_acc)
-        test_acc_list.append(test_acc)
 
-
+    test_acc, test_loss = eval(args, model, device, test_loader)
     print('best validation acc: ', max(val_acc_list))
-    print('best test acc: ', max(test_acc_list))
-    print('best acc: ', test_acc_list[val_acc_list.index(max(val_acc_list))])
-
+    print('best test acc: ', test_acc, test_loss)
 
 if __name__ == "__main__":
     main()

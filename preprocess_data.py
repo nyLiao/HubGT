@@ -203,11 +203,16 @@ def process_data(args, use_coarsen_feature=True):
             for v in node_feature_id:
                 queries.append((id, v.item()))
 
-            attn_bias = attn_bias.permute(1, 2, 0)
+            attn_bias = attn_bias.permute(1, 2, 0) # shape: [k0+k1+k2+2, k0+k1+k2+2, 6]
             sub_data_list.append([attn_bias, feature_id, label])
 
         data_list.append(sub_data_list)
 
+    if not os.path.exists('./dataset/' + args.data):
+        os.makedirs('./dataset/' + args.data)
+    torch.save(y, './dataset/'+args.data+'/y.pt')
+    torch.save(data_list, './dataset/'+args.data+'/data.pt')
+    torch.save(feature, './dataset/'+args.data+'/feature.pt')
     print('done!')
     return data_list, feature, y
 

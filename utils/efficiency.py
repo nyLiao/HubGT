@@ -34,6 +34,9 @@ class Stopwatch(object):
     def data(self) -> float:
         return self.elapsed_sec
 
+    def __repr__(self) -> str:
+        return f'{self.data:.2f} s'
+
     def __enter__(self):
         self.start()
         return self

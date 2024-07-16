@@ -44,6 +44,8 @@ public:
 
   bool ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t K, bool directed);
   int Label(int v, std::vector<int> &pos, std::vector<int> &dist);
+  int SNeighbor(int v, int size, std::vector<int> &pos, std::vector<int> &dist);
+  int SPush(int v, int size, float alpha, std::vector<int> &pos, std::vector<float> &dist);
 
   double IndexingTime()  const { return indexing_time; }
   double LoopCountTime() const { return loop_count_time; }

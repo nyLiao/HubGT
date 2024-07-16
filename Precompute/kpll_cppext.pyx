@@ -23,8 +23,20 @@ cdef class PyPLL:
 
         return result
 
-    def label(self, int s):
+    def label(self, int v):
         cdef vector[int] nodes
         cdef vector[int] dist
-        length = self.c_pll.Label(s, nodes, dist)
+        length = self.c_pll.Label(v, nodes, dist)
+        return nodes, dist, length
+
+    def s_neighbor(self, int v, int size):
+        cdef vector[int] nodes
+        cdef vector[int] dist
+        length = self.c_pll.SNeighbor(v, size, nodes, dist)
+        return nodes, dist, length
+
+    def s_push(self, int v, int size, float alpha):
+        cdef vector[int] nodes
+        cdef vector[float] dist
+        length = self.c_pll.SPush(v, size, alpha, nodes, dist)
         return nodes, dist, length

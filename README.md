@@ -17,8 +17,8 @@ conda clean --all
 
 ### Preprocess
 ```bash
-conda activate gt
-python3 preprocess_data.py
+cd Precompute/ && python setup.py build_ext --inplace && cd ..
+python preprocess_data.py
 ```
 
 ### Training

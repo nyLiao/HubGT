@@ -3,6 +3,8 @@ import math
 import torch.nn as nn
 from torch.nn import functional as F
 
+INF8 = 127
+
 
 def init_params(module, n_layers):
     if isinstance(module, nn.Linear):
@@ -40,7 +42,8 @@ class MultiHeadAttention(nn.Module):
         self.linear_q = nn.Linear(hidden_size, num_heads * att_size)
         self.linear_k = nn.Linear(hidden_size, num_heads * att_size)
         self.linear_v = nn.Linear(hidden_size, num_heads * att_size)
-        self.linear_bias = nn.Linear(attn_bias_dim, num_heads)
+        # self.linear_bias = nn.Linear(attn_bias_dim, num_heads)
+        self.linear_bias = nn.Embedding(INF8+1, num_heads, padding_idx=INF8)
         self.att_dropout = nn.Dropout(attention_dropout_rate)
 
         self.output_layer = nn.Linear(num_heads * att_size, hidden_size)
@@ -135,7 +138,7 @@ class MyEncoderLayer(nn.Module):
         self.att_dropout = nn.Dropout(attention_dropout_rate)
 
         self.output_layer = nn.Linear(num_heads * att_size, hidden_size)
-        
+
     def forward(self, x, attn_bias=None, get_score=False):
         d_k = self.att_size
         d_v = self.att_size
@@ -198,19 +201,20 @@ class GT(nn.Module):
         attn_bias, x = batched_data.attn_bias, batched_data.x
         # graph_attn_bias
         n_graph, n_node = x.size()[:2]
-        graph_attn_bias = attn_bias.clone()
+        graph_attn_bias = attn_bias.clone()         # [n_graph, n_node, n_node, hop]
         node_feature = self.node_encoder(x)         # [n_graph, n_node, n_hidden]
         if perturb is not None:
             node_feature += perturb
 
-        global_node_feature = self.graph_token.weight.unsqueeze(0).repeat(n_graph, 1, 1)
-        node_feature = torch.cat([node_feature, global_node_feature], dim=1)
+        # global_node_feature = self.graph_token.weight.unsqueeze(0).repeat(n_graph, 1, 1)
+        # node_feature = torch.cat([node_feature, global_node_feature], dim=1)
 
-        graph_attn_bias = torch.cat([graph_attn_bias, self.graph_token_virtual_distance.weight.unsqueeze(0).unsqueeze(2).
-                                     repeat(n_graph, 1, n_node, 1)], dim=1)
-        graph_attn_bias = torch.cat(
-            [graph_attn_bias, self.graph_token_virtual_distance.weight.unsqueeze(0).unsqueeze(0).
-            repeat(n_graph, n_node+self.num_global_node, 1, 1)], dim=2)
+        # graph_attn_bias = graph_attn_bias.unsqueeze(-1)
+        # graph_attn_bias = torch.cat([graph_attn_bias, self.graph_token_virtual_distance.weight.unsqueeze(0).unsqueeze(2).
+        #                              repeat(n_graph, 1, n_node, 1)], dim=1)
+        # graph_attn_bias = torch.cat(
+        #     [graph_attn_bias, self.graph_token_virtual_distance.weight.unsqueeze(0).unsqueeze(0).
+        #     repeat(n_graph, n_node+self.num_global_node, 1, 1)], dim=2)
 
         # transfomrer encoder
         output = self.input_dropout(node_feature)
@@ -228,5 +232,3 @@ class GT(nn.Module):
         # output part
         output = self.downstream_out_proj(output[:, 0, :])
         return F.log_softmax(output, dim=1)
-
-
