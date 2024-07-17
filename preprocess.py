@@ -1,14 +1,17 @@
-import argparse
+import os
 from tqdm import tqdm
+from functools import partial
 import numpy as np
 
 import torch
+from torch.utils.data import DataLoader
 from torch_geometric.data import Data
 import torch_geometric.utils as pyg_utils
 
 from load_data import SingleGraphLoader
 import utils
-from utils.collator import NodeDataLoader
+from utils.config import setup_argparse, setup_args
+from utils.collator import collate
 from Precompute import PyPLL
 
 
@@ -41,7 +44,7 @@ def process_data(args):
     sw0, sw1, sw_spd = utils.Stopwatch(), utils.Stopwatch(), utils.Stopwatch()
     pw0, pw1, pw2 = utils.Stopwatch(), utils.Stopwatch(), utils.Stopwatch()
     indices = torch.empty((2, 0), dtype=int)
-    ids = torch.zeros((num_nodes, s_total * args.ns), dtype=int)
+    ids = torch.zeros((num_nodes, args.ns, s_total), dtype=int)
     for iego, ego in enumerate(tqdm(id_map)):
         pw0.start()
         with sw0:
@@ -71,7 +74,7 @@ def process_data(args):
             g1 = choice_cap(nodes1, s1, p)
             subgraph[len(g0)+1:] = torch.tensor(g1, dtype=int)
 
-            ids[ego, s*s_total:(s+1)*s_total] = subgraph
+            ids[ego, s] = subgraph
             subgraph = torch.unique(subgraph)
             ui, vi = torch.triu_indices(subgraph.size(0), subgraph.size(0), offset=1)
             u, v = subgraph[ui], subgraph[vi]
@@ -93,9 +96,13 @@ def process_data(args):
         with sw_spd:
             values[i] = py_pll.k_distance_query(u, v, 1)[0]
     pw2.pause()
-    spd = Data(x=x, y=y, edge_index=indices, edge_attr=values)
+
+    spd = Data(edge_index=indices, edge_attr=values, x=x, y=y, num_nodes=num_nodes)
     spd.contiguous('x', 'y', 'edge_index', 'edge_attr')
     assert spd.is_coalesced()
+    # os.makedirs('./dataset/' + args.data, exist_ok=True)
+    # torch.save(spd, './dataset/'+args.data+'/spd.pt')
+    # torch.save(ids, './dataset/'+args.data+'/ids.pt')
     print(pw0, pw1, pw2)
     print(f'Labeling time: {sw0}, Neighbor time: {sw1}, SPD time: {sw_spd}, Size: {spd.num_edges}')
 
@@ -103,28 +110,25 @@ def process_data(args):
     loader = {}
     for split in ['train', 'val', 'test']:
         mask = getattr(data, f'{split}_mask')
-        loader[split] = NodeDataLoader(ids[mask], spd,
-            split=split, args=args)
+        shuffle = {'train': True, 'val': False, 'test': False}[split]
+        std = {'train': args.perturb_std, 'val': 0.0, 'test': 0.0}[split]
+        loader[split] = DataLoader(
+            pyg_utils.mask_to_index(mask),
+            batch_size=args.batch,
+            num_workers=args.num_workers,
+            shuffle=shuffle,
+            collate_fn=partial(collate,
+                ids=ids,
+                graph=spd,
+                device='cpu',
+                std=std,
+        ))
         s += f'{split}: {mask.sum().item()}, '
     print(s)
+
     return loader
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-s', '--seed', type=int, default=42, help='random seed')
-    parser.add_argument('-v', '--dev', type=int, default=0, help='GPU id')
-    # Data configuration
-    parser.add_argument('-d', '--data', type=str, default='citeseer', help='Dataset name')
-    parser.add_argument('-b', '--batch', type=int, default=32)
-    parser.add_argument('--data_split', type=str, default='60/20/20', help='Index or percentage of dataset split')
-    parser.add_argument('--multi', action='store_true', help='True for multi-label classification')
-
-    parser.add_argument('--kindex', type=int, default=8, help='top-K PLL')
-    parser.add_argument('-ns', type=int, default=8, help='num of subgraphs')
-    parser.add_argument('-ss', type=int, default=31, help='total num of nodes in each subgraph')
-    parser.add_argument('-s0', type=int, default=15, help='max num of label nodes in each subgraph')
-    parser.add_argument('-r0', type=float, default=-1.0, help='norm for label distance')
-    parser.add_argument('-r1', type=float, default=-1.0, help='norm for neighbor distance')
-    args = parser.parse_args()
+    args = setup_args(setup_argparse())
     process_data(args)

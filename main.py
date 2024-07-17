@@ -1,5 +1,4 @@
 import logging
-import argparse
 
 import numpy as np
 import torch
@@ -11,7 +10,7 @@ import utils
 from utils.lr import PolynomialDecayLR
 
 
-def learn(model, device, loader, optimizer):
+def learn(args, model, device, loader, optimizer):
     model.train()
     loss_epoch = utils.Accumulator()
     stopwatch = utils.Stopwatch()
@@ -30,7 +29,7 @@ def learn(model, device, loader, optimizer):
 
     return utils.ResLogger()(
         [('time_learn', stopwatch.data),
-         (f'loss_{loader.split}', loss_epoch.mean * loader.batch * loader.ns)])
+         ('loss_train', loss_epoch.mean * args.batch * args.ns)])
 
 
 # @torch.no_grad()
@@ -53,7 +52,7 @@ def learn(model, device, loader, optimizer):
 #     return res
 
 
-def eval(model, device, loader, evaluator=None):
+def eval(args, model, device, loader, evaluator=None):
     y_true = []
     y_pred = []
     model.eval()
@@ -69,10 +68,10 @@ def eval(model, device, loader, evaluator=None):
     y_true = torch.cat(y_true)
 
     pred_list = []
-    for i in torch.split(y_pred, loader.ns, dim=0):
+    for i in torch.split(y_pred, args.ns, dim=0):
         pred_list.append(i.bincount().argmax().unsqueeze(0))
     y_pred = torch.cat(pred_list)
-    y_true = y_true.view(-1, loader.ns)[:, 0]
+    y_true = y_true.view(-1, args.ns)[:, 0]
     correct = (y_pred == y_true).sum()
     acc = correct.item() / len(y_true)
 
@@ -130,11 +129,11 @@ def main(args):
     for epoch in range(1, args.epoch+1):
         res_learn.concat([('epoch', epoch, lambda x: format(x, '03d'))], row=epoch)
 
-        res = learn(model, args.device, loader['train'], optimizer)
+        res = learn(args, model, args.device, loader['train'], optimizer)
         res_learn.merge(res, rows=[epoch])
         time_learn.update(res_learn[epoch, 'time_learn'])
 
-        res = eval(model, args.device, loader['val'], evaluator)
+        res = eval(args, model, args.device, loader['val'], evaluator)
         res_learn.merge(res, rows=[epoch])
         metric_val = res_learn[epoch, 'f1_micro']
         scheduler.step()
@@ -156,45 +155,12 @@ def main(args):
 
     # ========== Run testing
     model = ckpt_logger.load('best', model=model)
-    res_test = eval(model, args.device, loader['test'], evaluator)
+    res_test = eval(args, model, args.device, loader['test'], evaluator)
     print(res_test)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-s', '--seed', type=utils.force_list_int, default=[42], help='random seed')
-    parser.add_argument('-v', '--device', type=int, default=3, help='which gpu to use if any (default: 0)')
-    parser.add_argument('-z', '--suffix', type=str, default=None, help='Save name suffix.')
-    parser.add_argument('--loglevel', type=int, default=10, help='10:progress, 15:train, 20:info, 25:result')
-    parser.add_argument('-quiet', action='store_true', help='Dry run without saving logs.')
-    # Model configuration
-    parser.add_argument('--n_layers', type=int, default=4)
-    parser.add_argument('--num_heads', type=int, default=8)
-    parser.add_argument('--hidden_dim', type=int, default=128)
-    parser.add_argument('--ffn_dim', type=int, default=128)
-    parser.add_argument('--intput_dropout_rate', type=float, default=0.1)
-    parser.add_argument('--dropout_rate', type=float, default=0.5)
-    parser.add_argument('--attention_dropout_rate', type=float, default=0.5)
-    parser.add_argument('--num_global_node', type=int, default=1)
-    # Optim configuration
-    parser.add_argument('--weight_decay', type=float, default=0.01)
-    parser.add_argument('--warmup_epochs', type=int, default=100)
-    parser.add_argument('-e', '--epoch', type=int, default=1000)
-    parser.add_argument('-p', '--patience', type=int, default=50, help='Patience epoch for early stopping')
-    parser.add_argument('--peak_lr', type=float, default=2e-4)
-    parser.add_argument('--end_lr', type=float, default=1e-9)
-    # Data configuration
-    parser.add_argument('-d', '--data', type=str, default='citeseer', help='Dataset name')
-    parser.add_argument('-b', '--batch', type=int, default=32)
-    parser.add_argument('--data_split', type=str, default='60/20/20', help='Index or percentage of dataset split')
-    parser.add_argument('--multi', action='store_true', help='True for multi-label classification')
-    parser.add_argument('--kindex', type=int, default=8, help='top-K PLL')
-    parser.add_argument('-ns', type=int, default=8, help='num of subgraphs')
-    parser.add_argument('-ss', type=int, default=31, help='total num of nodes in each subgraph')
-    parser.add_argument('-s0', type=int, default=15, help='max num of label nodes in each subgraph')
-    parser.add_argument('-r0', type=float, default=-1.0, help='norm for label distance')
-    parser.add_argument('-r1', type=float, default=-1.0, help='norm for neighbor distance')
-    parser = utils.setup_argparse(parser)
+    parser = utils.setup_argparse()
     args = utils.setup_args(parser)
 
     seed_lst = args.seed.copy()

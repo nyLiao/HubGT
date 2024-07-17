@@ -39,16 +39,54 @@ def setup_cuda(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
-def setup_argparse(parser):
+def setup_argparse():
     np.set_printoptions(linewidth=160, edgeitems=5, threshold=20,
                         formatter=dict(float=lambda x: f"{x: 9.3e}"))
     torch.set_printoptions(linewidth=160, edgeitems=5)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-s', '--seed', type=force_list_int, default=[42], help='random seed')
+    parser.add_argument('-v', '--device', type=int, default=3, help='which gpu to use if any (default: 0)')
+    parser.add_argument('-z', '--suffix', type=str, default=None, help='Save name suffix.')
+    parser.add_argument('--loglevel', type=int, default=10, help='10:progress, 15:train, 20:info, 25:result')
+    parser.add_argument('-quiet', action='store_true', help='Dry run without saving logs.')
+    # Model configuration
+    parser.add_argument('--n_layers', type=int, default=4)
+    parser.add_argument('--num_heads', type=int, default=8)
+    parser.add_argument('--hidden_dim', type=int, default=128)
+    parser.add_argument('--ffn_dim', type=int, default=128)
+    parser.add_argument('--intput_dropout_rate', type=float, default=0.1)
+    parser.add_argument('--dropout_rate', type=float, default=0.5)
+    parser.add_argument('--attention_dropout_rate', type=float, default=0.5)
+    parser.add_argument('--num_global_node', type=int, default=1)
+    # Optim configuration
+    parser.add_argument('--weight_decay', type=float, default=0.01)
+    parser.add_argument('--warmup_epochs', type=int, default=100)
+    parser.add_argument('-e', '--epoch', type=int, default=1000)
+    parser.add_argument('-p', '--patience', type=int, default=50, help='Patience epoch for early stopping')
+    parser.add_argument('--peak_lr', type=float, default=2e-4)
+    parser.add_argument('--end_lr', type=float, default=1e-9)
+    # Data configuration
+    parser.add_argument('-d', '--data', type=str, default='citeseer', help='Dataset name')
+    parser.add_argument('-b', '--batch', type=int, default=32)
+    parser.add_argument('--data_split', type=str, default='60/20/20', help='Index or percentage of dataset split')
+    parser.add_argument('--multi', action='store_true', help='True for multi-label classification')
+    parser.add_argument('--num_workers', type=int, default=16, help='number of loader workers')
+    parser.add_argument('--perturb_std', type=float, default=0.0, help='perturb for training data')
+    # Precompute configuration
+    parser.add_argument('--kindex', type=int, default=8, help='top-K PLL')
+    parser.add_argument('-ns', type=int, default=8, help='num of subgraphs')
+    parser.add_argument('-ss', type=int, default=31, help='total num of nodes in each subgraph')
+    parser.add_argument('-s0', type=int, default=15, help='max num of label nodes in each subgraph')
+    parser.add_argument('-r0', type=float, default=-1.0, help='norm for label distance')
+    parser.add_argument('-r1', type=float, default=-1.0, help='norm for neighbor distance')
     return parser
 
 
 def setup_args(parser: argparse.ArgumentParser) -> argparse.Namespace:
     # Check args
     args = parser.parse_args()
+    # args, unknown = parser.parse_known_args()
     args = setup_cuda(args)
     return args
 
