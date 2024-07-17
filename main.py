@@ -29,7 +29,7 @@ def learn(args, model, device, loader, optimizer):
 
     return utils.ResLogger()(
         [('time_learn', stopwatch.data),
-         ('loss_train', loss_epoch.mean * args.batch * args.ns)])
+         ('loss_train', loss_epoch.data)])
 
 
 # @torch.no_grad()

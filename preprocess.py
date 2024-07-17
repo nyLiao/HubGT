@@ -2,6 +2,7 @@ import os
 from tqdm import tqdm
 from functools import partial
 import numpy as np
+import scipy.sparse as sp
 
 import torch
 from torch.utils.data import DataLoader
@@ -49,10 +50,12 @@ def process_data(args):
         pw0.start()
         with sw0:
             nodes0, val0, s0_actual = py_pll.label(ego)
+            val0 = np.array(val0) ** args.r0
         s0 = min(args.s0, s0_actual)
         s1 = s_total - s0 - 1
         with sw1:
             nodes1, val1, s1_actual = py_pll.s_neighbor(ego, s1)
+            val1 = np.array(val1) ** args.r1
             # nodes1, val1, s1_actual = py_pll.s_push(ego, s1, args.r1)
             # TODO: reduce dulp for s_push
         pw0.pause()
@@ -64,14 +67,11 @@ def process_data(args):
             subgraph[0] = ego
 
             # Add label nodes
-            p = np.array(val0) ** args.r0
-            g0 = choice_cap(nodes0, args.s0, p)
+            g0 = choice_cap(nodes0, args.s0, val0)
             subgraph[1:len(g0)+1] = torch.tensor(g0, dtype=int)
 
             # Add neighbor nodes
-            p = np.array(val1) ** args.r1
-            # p = np.array(val1)
-            g1 = choice_cap(nodes1, s1, p)
+            g1 = choice_cap(nodes1, s1, val1)
             subgraph[len(g0)+1:] = torch.tensor(g1, dtype=int)
 
             ids[ego, s] = subgraph
@@ -97,14 +97,18 @@ def process_data(args):
             values[i] = py_pll.k_distance_query(u, v, 1)[0]
     pw2.pause()
 
-    spd = Data(edge_index=indices, edge_attr=values, x=x, y=y, num_nodes=num_nodes)
-    spd.contiguous('x', 'y', 'edge_index', 'edge_attr')
-    assert spd.is_coalesced()
+    spd = sp.coo_matrix(
+        (values.numpy(), indices.numpy()),
+        shape=(num_nodes, num_nodes),
+        dtype=np.int16
+    ).tocsr()
+    graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd)
+    graph.contiguous('x', 'y')
     # os.makedirs('./dataset/' + args.data, exist_ok=True)
-    # torch.save(spd, './dataset/'+args.data+'/spd.pt')
+    # torch.save(graph, './dataset/'+args.data+'/spd.pt')
     # torch.save(ids, './dataset/'+args.data+'/ids.pt')
     print(pw0, pw1, pw2)
-    print(f'Labeling time: {sw0}, Neighbor time: {sw1}, SPD time: {sw_spd}, Size: {spd.num_edges}')
+    print(f'Labeling time: {sw0}, Neighbor time: {sw1}, SPD time: {sw_spd}, Size: {graph.num_edges}')
 
     s = ''
     loader = {}
@@ -119,8 +123,7 @@ def process_data(args):
             shuffle=shuffle,
             collate_fn=partial(collate,
                 ids=ids,
-                graph=spd,
-                device='cpu',
+                graph=graph,
                 std=std,
         ))
         s += f'{split}: {mask.sum().item()}, '

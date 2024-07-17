@@ -15,14 +15,13 @@ conda clean --all
 ```
 
 
-### Preprocess
+### Compile
 ```bash
 cd Precompute/ && python setup.py build_ext --inplace && cd ..
-python preprocess_data.py
 ```
 
-### Training
+### Run
 
-```
-sh scripts/${dataset_name}.sh
+```bash
+python main.py
 ```
