@@ -12,15 +12,16 @@ import torch_geometric.utils as pyg_utils
 from load_data import SingleGraphLoader
 import utils
 from utils.config import setup_argparse, setup_args
-from utils.collator import collate
+from utils.collator import collate, INF8
 from Precompute import PyPLL
 
 
-def choice_cap(a: list, size: int, p: np.ndarray=None):
+def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
     if len(a) <= size:
-        return a
+        return np.tile(a, (nsample, 1))
     p = p / np.sum(p)
-    return np.random.choice(a, size, replace=False, p=p).tolist()
+    ret = [np.random.choice(a, size, replace=False, p=p) for _ in range(nsample)]
+    return np.vstack(ret)
 
 
 def process_data(args):
@@ -44,13 +45,15 @@ def process_data(args):
     s_total = args.ss
     sw0, sw1, sw_spd = utils.Stopwatch(), utils.Stopwatch(), utils.Stopwatch()
     pw0, pw1, pw2 = utils.Stopwatch(), utils.Stopwatch(), utils.Stopwatch()
-    indices = torch.empty((2, 0), dtype=int)
+    spd = sp.coo_matrix((num_nodes, num_nodes), dtype=int,)
     ids = torch.zeros((num_nodes, args.ns, s_total), dtype=int)
     for iego, ego in enumerate(tqdm(id_map)):
+        # Generate SPD neighborhood
         pw0.start()
         with sw0:
             nodes0, val0, s0_actual = py_pll.label(ego)
             val0 = np.array(val0) ** args.r0
+            val0[val0 == np.inf] = INF8 - 1
         s0 = min(args.s0, s0_actual)
         s1 = s_total - s0 - 1
         with sw1:
@@ -61,48 +64,45 @@ def process_data(args):
         pw0.pause()
         pw1.start()
 
-        indices_i = torch.empty((2, 0), dtype=int)
-        for s in range(args.ns):
-            subgraph = torch.empty((s_total,), dtype=int)
-            subgraph[0] = ego
+        # Sample neighbors
+        indices_i = np.zeros((2, args.ns * s_total), dtype=np.int16)
+        ids_i = [
+            np.repeat(ego, args.ns).reshape(-1, 1),
+            choice_cap(nodes0, args.s0, args.ns, val0),
+            choice_cap(nodes1, s1, args.ns, val1)
+        ]
+        ids_i = np.hstack(ids_i)      # [ns, s_total]
+        ids[ego] = torch.tensor(ids_i, dtype=int)
 
-            # Add label nodes
-            g0 = choice_cap(nodes0, args.s0, val0)
-            subgraph[1:len(g0)+1] = torch.tensor(g0, dtype=int)
-
-            # Add neighbor nodes
-            g1 = choice_cap(nodes1, s1, val1)
-            subgraph[len(g0)+1:] = torch.tensor(g1, dtype=int)
-
-            ids[ego, s] = subgraph
-            subgraph = torch.unique(subgraph)
-            ui, vi = torch.triu_indices(subgraph.size(0), subgraph.size(0), offset=1)
-            u, v = subgraph[ui], subgraph[vi]
-            # TODO: edge dropout
-            ii = torch.stack([u, v], dim=0)
-            indices_i = torch.cat([indices_i, ii], dim=1)
+        # Append SPD indices
+        indices_i = []
+        for ids_s in ids_i:
+            subset = np.unique(ids_s)
+            s_row, s_col = np.triu_indices(len(subset), 1)
+            s_row, s_col = subset[s_row], subset[s_col]
+            indices_i.append(np.vstack([s_row, s_col]))
+        indices_i = np.hstack(indices_i)
         mask = (indices_i[0] < indices_i[1])
         indices_i = indices_i[:, mask]
-        indices_i = pyg_utils.coalesce(indices_i)
-        indices = torch.cat([indices, indices_i], dim=1)
+        values_i = np.ones_like(indices_i[0], dtype=int)
+        spd_i = sp.coo_matrix(
+            (values_i, indices_i),
+            shape=(num_nodes, num_nodes),
+        )
+        spd += spd_i
         pw1.pause()
 
     pw2.start()
-    mask = (indices[0] < indices[1])
-    indices = indices[:, mask]
-    indices = pyg_utils.coalesce(indices, num_nodes=num_nodes)
-    values  = torch.empty_like(indices[0], dtype=torch.int16)
-    for i, (u, v) in enumerate(tqdm(indices.t())):
+    spd.sum_duplicates()
+    rows, cols, _ = sp.find(spd)
+    for i, (u, v) in enumerate(tqdm(zip(rows, cols), total=len(rows))):
         with sw_spd:
-            values[i] = py_pll.k_distance_query(u, v, 1)[0]
+            spd.data[i] = py_pll.k_distance_query(u, v, 1)[0]
+    # spd.data = spd.data.clip(0, INF8)
+    # spd.data = (spd.data * (float(INF8) / np.max(spd.data))).astype(int)
     pw2.pause()
 
-    spd = sp.coo_matrix(
-        (values.numpy(), indices.numpy()),
-        shape=(num_nodes, num_nodes),
-        dtype=np.int16
-    ).tocsr()
-    graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd)
+    graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd.tocsr())
     graph.contiguous('x', 'y')
     # os.makedirs('./dataset/' + args.data, exist_ok=True)
     # torch.save(graph, './dataset/'+args.data+'/spd.pt')
