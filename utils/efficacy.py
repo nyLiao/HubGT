@@ -29,11 +29,11 @@ class F1Calculator(object):
             # For multi-class classification, F1 micro is equivalent to accuracy
             f1 = 2 * self.TP.float().sum() / (2 * self.TP.sum() + self.FP.sum() + self.FN.sum() + eps)
             # return f1.item()
-            return [('f1_micro', f1.item(), lambda x: format(x*100, '.3f'))]
+            return [('f1i', f1.item(), lambda x: format(x*100, '.3f'))]
         elif average == 'macro':
             f1 = 2 * self.TP.float() / (2 * self.TP + self.FP + self.FN + eps)
             # return f1.mean().item()
-            return [('f1_macro', f1.mean().item(), lambda x: format(x*100, '.3f'))]
+            return [('f1a', f1.mean().item(), lambda x: format(x*100, '.3f'))]
         else:
             raise ValueError('average must be "micro" or "macro"')
 

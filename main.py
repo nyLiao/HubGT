@@ -1,19 +1,22 @@
 import logging
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 
 from model import GT
 from preprocess import process_data
 import utils
-from utils.lr import PolynomialDecayLR
+from utils import (
+    Accumulator, Stopwatch,
+    ResLogger, CkptLogger,
+    PolynomialDecayLR
+)
 
 
 def learn(args, model, device, loader, optimizer):
     model.train()
-    loss_epoch = utils.Accumulator()
-    stopwatch = utils.Stopwatch()
+    loss_epoch = Accumulator()
+    stopwatch = Stopwatch()
 
     for batch in loader:
         batch = batch.to(device)
@@ -27,67 +30,49 @@ def learn(args, model, device, loader, optimizer):
 
         loss_epoch.update(loss.item(), count=label.size(0))
 
-    return utils.ResLogger()(
+    return ResLogger()(
         [('time_learn', stopwatch.data),
          ('loss_train', loss_epoch.data)])
 
 
-# @torch.no_grad()
-# def eval(model, device, loader, evaluator):
-#     model.eval()
-#     stopwatch = utils.Stopwatch()
-
-#     for batch in loader:
-#         batch = batch.to(device)
-#         with stopwatch:
-#             output = model(batch)
-#             label  = batch.y.view(-1)
-#         evaluator(output.argmax(1), label)
-
-#     res = utils.ResLogger()
-#     res.concat(evaluator.compute())
-#     res.concat([('time', stopwatch.data)], suffix=loader.split)
-#     evaluator.reset()
-#     stopwatch.reset()
-#     return res
-
-
-def eval(args, model, device, loader, evaluator=None):
-    y_true = []
-    y_pred = []
+@torch.no_grad()
+def eval(args, model, device, loader, evaluator):
     model.eval()
+    stopwatch = Stopwatch()
 
-    with torch.no_grad():
-        for batch in loader:
-            batch = batch.to(device)
-            pred = model(batch)
-            y_true.append(batch.y)
-            y_pred.append(pred.argmax(1))
+    for batch in loader:
+        batch = batch.to(device)
+        with stopwatch:
+            output = model(batch)
+            label  = batch.y.view(-1, args.ns)[:, 0]
+        output = output.argmax(1)
+        out_list = []
+        for out_i in torch.split(output, args.ns, dim=0):
+            out_list.append(out_i.bincount().argmax().unsqueeze(0))
+        output = torch.cat(out_list)
+        evaluator(output, label)
 
-    y_pred = torch.cat(y_pred)
-    y_true = torch.cat(y_true)
-
-    pred_list = []
-    for i in torch.split(y_pred, args.ns, dim=0):
-        pred_list.append(i.bincount().argmax().unsqueeze(0))
-    y_pred = torch.cat(pred_list)
-    y_true = y_true.view(-1, args.ns)[:, 0]
-    correct = (y_pred == y_true).sum()
-    acc = correct.item() / len(y_true)
-
-    return utils.ResLogger().concat([('f1_micro', acc)])
+    res = ResLogger()
+    res.concat(evaluator.compute())
+    res.concat([('time', stopwatch.data)])
+    evaluator.reset()
+    stopwatch.reset()
+    return res
 
 
 def main(args):
     # ========== Run configuration
     logger = utils.setup_logger(args.logpath, level_console=args.loglevel, quiet=args.quiet)
-    res_logger = utils.ResLogger(quiet=args.quiet)
+    res_logger = ResLogger(quiet=args.quiet)
     res_logger.concat([('seed', args.seed),])
 
     # ========== Load data
-    loader = process_data(args)
+    loader = process_data(args, res_logger)
+    with args.device:
+        torch.cuda.empty_cache()
 
     # ========== Load model
+    logger.debug('-'*20 + f" Loading model " + '-'*20)
     model = GT(
         n_layers=args.n_layers,
         num_heads=args.num_heads,
@@ -101,7 +86,7 @@ def main(args):
         ffn_dim=args.ffn_dim,
         num_global_node=args.num_global_node
     )
-    print(model)
+    logger.log(logging.LTRN, str(model))
     model.to(args.device)
 
     optimizer = torch.optim.AdamW(model.parameters(),
@@ -114,18 +99,18 @@ def main(args):
             lr=args.peak_lr,
             end_lr=args.end_lr,
             power=1.0)
-    evaluator = utils.F1Calculator(args.num_classes)
-    ckpt_logger = utils.CkptLogger(
+    evaluator = utils.get_evaluator(args).to(args.device)
+    evaluator = {split: evaluator.clone(postfix='_'+split) for split in ['val', 'test']}
+    ckpt_logger = CkptLogger(
             args.logpath,
             patience=args.patience,
             period=1,
             prefix=('-'.join(filter(None, ['model', args.suffix]))),)
-    print(args)
 
     # ========== Run training
     logger.debug('-'*20 + f" Start training: {args.epoch} " + '-'*20)
-    time_learn = utils.Accumulator()
-    res_learn = utils.ResLogger()
+    time_learn = Accumulator()
+    res_learn = ResLogger()
     for epoch in range(1, args.epoch+1):
         res_learn.concat([('epoch', epoch, lambda x: format(x, '03d'))], row=epoch)
 
@@ -133,9 +118,9 @@ def main(args):
         res_learn.merge(res, rows=[epoch])
         time_learn.update(res_learn[epoch, 'time_learn'])
 
-        res = eval(args, model, args.device, loader['val'], evaluator)
+        res = eval(args, model, args.device, loader['val'], evaluator['val'])
         res_learn.merge(res, rows=[epoch])
-        metric_val = res_learn[epoch, 'f1_micro']
+        metric_val = res_learn[epoch, args.metric+'_val']
         scheduler.step()
 
         logger.log(logging.LTRN, res_learn.get_str(row=epoch))
@@ -145,18 +130,26 @@ def main(args):
         if ckpt_logger.is_early_stop:
             break
 
-    res_train = utils.ResLogger()
-    res_train.concat(ckpt_logger.get_at_best())
-    res_train.concat(
+    res_logger.concat(ckpt_logger.get_at_best())
+    res_logger.concat(
         [('epoch', ckpt_logger.epoch_current),
-            ('time', time_learn.data),],
+         ('time', time_learn.data),],
         suffix='learn')
-    print(res_train)
 
     # ========== Run testing
     model = ckpt_logger.load('best', model=model)
-    res_test = eval(args, model, args.device, loader['test'], evaluator)
-    print(res_test)
+    res_test = eval(args, model, args.device, loader['test'], evaluator['test'])
+    res_logger.merge(res_test)
+    res_logger.concat([
+        ('mem_ram_learn', utils.MemoryRAM()(unit='G')),
+        ('mem_cuda_learn', utils.MemoryCUDA()(unit='G')),
+    ])
+
+    logger.info(f"[args]: {args}")
+    logger.log(logging.LRES, f"[res]: {res_logger}")
+    res_logger.save()
+    utils.save_args(args.logpath, vars(args))
+    utils.clear_logger(logger)
 
 
 if __name__ == "__main__":
@@ -168,7 +161,7 @@ if __name__ == "__main__":
         args.seed = utils.setup_seed(seed, args.cuda)
         args.flag = f'{args.seed}'
         args.logpath, args.logid = utils.setup_logpath(
-            folder_args=(args.data, 'GT', args.flag),
+            folder_args=(args.data, args.flag),
             quiet=args.quiet)
 
         main(args)

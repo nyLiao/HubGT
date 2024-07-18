@@ -270,4 +270,4 @@ class SingleGraphLoader(object):
         return self.get(*args, **kwargs)
 
     def __str__(self) -> str:
-        return f"{self.data}({self.metric})"
+        return f"{self.data}"

@@ -104,6 +104,25 @@ class NumFmt(object):
         return self.get(*args, **kwargs)
 
 
+def log_memory(suffix: str = None, row: int = 0):
+    def decorator(func):
+        def wrapper(self, *args, **kwargs):
+            with self.device:
+                torch.cuda.empty_cache()
+
+            res = func(self, *args, **kwargs)
+            res.concat(
+                [('mem_ram', MemoryRAM()(unit='G')),
+                 ('mem_cuda', MemoryCUDA()(unit='G')),],
+                row=row, suffix=suffix)
+
+            with self.device:
+                torch.cuda.empty_cache()
+            return res
+        return wrapper
+    return decorator
+
+
 class MemoryRAM(NumFmt):
     r"""Memory usage of current process in RAM.
     """

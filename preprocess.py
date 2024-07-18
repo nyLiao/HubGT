@@ -11,7 +11,6 @@ import torch_geometric.utils as pyg_utils
 
 from load_data import SingleGraphLoader
 import utils
-from utils.config import setup_argparse, setup_args
 from utils.collator import collate, INF8
 from Precompute import PyPLL
 
@@ -24,10 +23,14 @@ def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
     return np.vstack(ret)
 
 
-def process_data(args):
+def process_data(args, res_logger):
     # TODO: address LargestConnectedComponents by using s_total global landmarks
     data_loader = SingleGraphLoader(args)
     data, metric = data_loader(args)
+    res_logger.concat([
+        ('data', args.data),
+        ('metric', metric),
+    ])
     num_nodes = data.num_nodes
     x, y = data.x, data.y
     undirected = pyg_utils.is_undirected(data.edge_index)
@@ -129,9 +132,13 @@ def process_data(args):
         s += f'{split}: {mask.sum().item()}, '
     print(s)
 
+    res_logger.concat([
+        ('mem_ram_pre', utils.MemoryRAM()(unit='G')),
+        ('mem_cuda_pre', utils.MemoryCUDA()(unit='G')),
+    ])
     return loader
 
 
 if __name__ == '__main__':
-    args = setup_args(setup_argparse())
+    args = utils.setup_args(utils.setup_argparse())
     process_data(args)
