@@ -46,7 +46,7 @@ class SingleGraphLoader(object):
         self.transform = T.Compose([
             T.RemoveIsolatedNodes(),
             T.RemoveDuplicatedEdges(reduce='mean'),
-            T.LargestConnectedComponents(),
+            # T.LargestConnectedComponents(),
             # T.AddRemainingSelfLoops(fill_value=1.0),
             T.NormalizeFeatures(),
             # T.ToSparseTensor(remove_edge_index=False, layout=torch.sparse_csr),
@@ -167,7 +167,7 @@ class SingleGraphLoader(object):
             else:
                 self.metric = 's_f1i'
             if self.data not in ['snap-patents']:
-                self._T_insert(T.ToUndirected(), index=0)
+                kwargs['transform'] = self._T_insert(T.ToUndirected(), index=0)
         elif self.data in ['penn94', 'amherst41', 'cornell5', 'johns_hopkins55', 'reed98']:
             module_name = 'dataset_process'
             class_name = 'FB100'
@@ -196,7 +196,7 @@ class SingleGraphLoader(object):
             kwargs = dict(
                 root=DATAPATH.joinpath('PyG'),
                 name=self.data,
-                transform=self.transform,)
+                transform=self._T_insert(T.ToUndirected(), index=0),)
             pyg_mapping = {
                 'cora':         'Planetoid',
                 'citeseer':     'Planetoid',

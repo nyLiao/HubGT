@@ -28,11 +28,11 @@ def learn(args, model, device, loader, optimizer):
             loss.backward()
             optimizer.step()
 
-        loss_epoch.update(loss.item(), count=label.size(0))
+        loss_epoch.update(loss.item(), count=label.size(0)/args.ns)
 
     return ResLogger()(
         [('time_learn', stopwatch.data),
-         ('loss_train', loss_epoch.data)])
+         ('loss_train', loss_epoch.mean)])
 
 
 @torch.no_grad()
@@ -43,18 +43,19 @@ def eval(args, model, device, loader, evaluator):
     for batch in loader:
         batch = batch.to(device)
         with stopwatch:
-            output = model(batch)
+            output = model(batch).view(-1, args.ns, args.num_classes)
             label  = batch.y.view(-1, args.ns)[:, 0]
-        output = output.argmax(1)
-        out_list = []
-        for out_i in torch.split(output, args.ns, dim=0):
-            out_list.append(out_i.bincount().argmax().unsqueeze(0))
-        output = torch.cat(out_list)
-        evaluator(output, label)
+
+        # Average output matrix on subgraph dim based on majority predicted class
+        pred = output.argmax(dim=2)  # [batch, ns]
+        mask = torch.mode(pred, dim=1).values
+        mask = torch.where(pred == mask[:, None], 1, 0)
+        output = torch.sum(output * mask[:, :, None], dim=1) / mask.sum(dim=1)[:, None]
+        evaluator(output.view(-1, args.num_classes), label)
 
     res = ResLogger()
     res.concat(evaluator.compute())
-    res.concat([('time', stopwatch.data)])
+    res.concat([('time_eval', stopwatch.data)])
     evaluator.reset()
     stopwatch.reset()
     return res
@@ -94,7 +95,7 @@ def main(args):
             weight_decay=args.weight_decay)
     scheduler = PolynomialDecayLR(
             optimizer,
-            warmup=args.warmup_epochs,
+            warmup=args.epoch // 10,
             tot=args.epoch,
             lr=args.peak_lr,
             end_lr=args.end_lr,
@@ -131,10 +132,10 @@ def main(args):
             break
 
     res_logger.concat(ckpt_logger.get_at_best())
-    res_logger.concat(
-        [('epoch', ckpt_logger.epoch_current),
-         ('time', time_learn.data),],
-        suffix='learn')
+    res_logger.concat([
+        ('epoch', ckpt_logger.epoch_current),
+        ('time', time_learn.data),
+    ], suffix='learn')
 
     # ========== Run testing
     model = ckpt_logger.load('best', model=model)

@@ -34,7 +34,7 @@ def get_evaluator(args: Namespace) -> MetricCollection:
             # 's_acc': MultilabelAccuracy(num_classes=args.num_classes),
             's_f1i': MultilabelF1Score(num_labels=args.num_classes, average='micro'),
             # 's_f1a': MultilabelF1Score(num_labels=args.num_classes, average='macro'),
-            # 's_auroc': MultilabelAUROC(num_classes=args.num_classes),
+            's_auroc': MultilabelAUROC(num_classes=args.num_classes),
             # 's_ap': MultilabelAveragePrecision(num_classes=args.num_classes),
         })
     else:
@@ -42,7 +42,7 @@ def get_evaluator(args: Namespace) -> MetricCollection:
             # 's_acc': MulticlassAccuracy(num_classes=args.num_classes),
             's_f1i': MulticlassF1Score(num_classes=args.num_classes, average='micro'),
             # 's_f1a': MulticlassF1Score(num_classes=args.num_classes, average='macro'),
-            # 's_auroc': MulticlassAUROC(num_classes=args.num_classes),
+            's_auroc': MulticlassAUROC(num_classes=args.num_classes),
             # 's_ap': MulticlassAveragePrecision(num_classes=args.num_classes),
         })
     return metric

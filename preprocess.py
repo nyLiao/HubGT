@@ -1,4 +1,4 @@
-import os
+import logging
 from tqdm import tqdm
 from functools import partial
 import numpy as np
@@ -23,8 +23,8 @@ def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
     return np.vstack(ret)
 
 
-def process_data(args, res_logger):
-    # TODO: address LargestConnectedComponents by using s_total global landmarks
+def process_data(args, res_logger=utils.ResLogger()):
+    logger = logging.getLogger('log')
     data_loader = SingleGraphLoader(args)
     data, metric = data_loader(args)
     res_logger.concat([
@@ -34,6 +34,9 @@ def process_data(args, res_logger):
     num_nodes = data.num_nodes
     x, y = data.x, data.y
     undirected = pyg_utils.is_undirected(data.edge_index)
+    if not undirected:
+        logger.warning(f'Warning: Directed graph.')
+
     deg = pyg_utils.degree(data.edge_index[0], num_nodes, dtype=int)
     id_map = torch.argsort(deg, descending=False)
     id_map_inv = torch.empty_like(id_map)
@@ -56,7 +59,7 @@ def process_data(args, res_logger):
         with sw0:
             nodes0, val0, s0_actual = py_pll.label(ego)
             val0 = np.array(val0) ** args.r0
-            val0[val0 == np.inf] = INF8 - 1
+            val0[val0 == np.inf] = 0
         s0 = min(args.s0, s0_actual)
         s1 = s_total - s0 - 1
         with sw1:
@@ -64,17 +67,14 @@ def process_data(args, res_logger):
             val1 = np.array(val1) ** args.r1
             # nodes1, val1, s1_actual = py_pll.s_push(ego, s1, args.r1)
             # TODO: reduce dulp for s_push
+        s1 = min(s1, s1_actual)
         pw0.pause()
         pw1.start()
 
         # Sample neighbors
-        indices_i = np.zeros((2, args.ns * s_total), dtype=np.int16)
-        ids_i = [
-            np.repeat(ego, args.ns).reshape(-1, 1),
-            choice_cap(nodes0, args.s0, args.ns, val0),
-            choice_cap(nodes1, s1, args.ns, val1)
-        ]
-        ids_i = np.hstack(ids_i)      # [ns, s_total]
+        ids_i = np.full((args.ns, s_total), ego, dtype=np.int16)
+        ids_i[:, 1:s0+1] = choice_cap(nodes0, s0, args.ns, val0)
+        ids_i[:, s0+1:s0+s1+1] = choice_cap(nodes1, s1, args.ns, val1)
         ids[ego] = torch.tensor(ids_i, dtype=int)
 
         # Append SPD indices
@@ -86,6 +86,7 @@ def process_data(args, res_logger):
             indices_i.append(np.vstack([s_row, s_col]))
         indices_i = np.hstack(indices_i)
         mask = (indices_i[0] < indices_i[1])
+        # TODO: random dropout
         indices_i = indices_i[:, mask]
         values_i = np.ones_like(indices_i[0], dtype=int)
         spd_i = sp.coo_matrix(
@@ -95,6 +96,7 @@ def process_data(args, res_logger):
         spd += spd_i
         pw1.pause()
 
+    # SPD graph value
     pw2.start()
     spd.sum_duplicates()
     rows, cols, _ = sp.find(spd)

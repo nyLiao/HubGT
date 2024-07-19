@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-INF8 = 127
+INF8 = 255
 
 
 class Batch(object):

@@ -3,7 +3,7 @@ import math
 import torch.nn as nn
 from torch.nn import functional as F
 
-INF8 = 127
+INF8 = 255
 
 
 def init_params(module, n_layers):
@@ -59,7 +59,13 @@ class MultiHeadAttention(nn.Module):
         q = self.linear_q(q).view(batch_size, -1, self.num_heads, d_k)
         k = self.linear_k(k).view(batch_size, -1, self.num_heads, d_k)
         v = self.linear_v(v).view(batch_size, -1, self.num_heads, d_v)
-        attn_bias = self.linear_bias(attn_bias).permute(0, 3, 1, 2)
+
+        # SPD PE
+        mask_off = (attn_bias == INF8)              # [b, s_total, s_total]
+        attn_bias = self.linear_bias(attn_bias)     # [b, s_total, s_total, h]
+        attn_bias[mask_off] = -torch.inf
+        attn_bias = attn_bias.permute(0, 3, 1, 2)   # [b, h, s_total, s_total]
+        # attn_bias = self.linear_bias(attn_bias).permute(0, 3, 1, 2)
 
         q = q.transpose(1, 2)                  # [b, h, q_len, d_k]
         v = v.transpose(1, 2)                  # [b, h, v_len, d_v]

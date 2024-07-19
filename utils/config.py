@@ -61,14 +61,13 @@ def setup_argparse():
     parser.add_argument('--num_global_node', type=int, default=1)
     # Optim configuration
     parser.add_argument('--weight_decay', type=float, default=0.01)
-    parser.add_argument('--warmup_epochs', type=int, default=100)
-    parser.add_argument('-e', '--epoch', type=int, default=1000)
+    parser.add_argument('-e', '--epoch', type=int, default=200)
     parser.add_argument('-p', '--patience', type=int, default=50, help='Patience epoch for early stopping')
     parser.add_argument('--peak_lr', type=float, default=2e-4)
     parser.add_argument('--end_lr', type=float, default=1e-9)
     # Data configuration
     parser.add_argument('-d', '--data', type=str, default='citeseer', help='Dataset name')
-    parser.add_argument('-b', '--batch', type=int, default=32)
+    parser.add_argument('-b', '--batch', type=int, default=256)
     parser.add_argument('--data_split', type=str, default='60/20/20', help='Index or percentage of dataset split')
     parser.add_argument('--multi', action='store_true', help='True for multi-label classification')
     parser.add_argument('--num_workers', type=int, default=16, help='number of loader workers')
