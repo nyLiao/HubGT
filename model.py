@@ -30,6 +30,30 @@ class FeedForwardNetwork(nn.Module):
         return x
 
 
+class StructuralEmbedding(nn.Module):
+    def __init__(self, num_heads):
+        super(StructuralEmbedding, self).__init__()
+        self.linear_bias = nn.Embedding(INF8+1, num_heads, padding_idx=INF8)
+
+    def forward(self, attn_bias):
+        # assert attn_bias.size(3) == 1
+        attn_bias = attn_bias.squeeze(3)
+        mask_off = (attn_bias == INF8)                      # [b, s_total, s_total]
+        attn_bias = self.linear_bias(attn_bias.int())       # [b, s_total, s_total, h]
+        attn_bias[mask_off] = -torch.inf
+        return attn_bias.permute(0, 3, 1, 2)                # [b, h, s_total, s_total]
+
+
+class StructuralLinear(nn.Module):
+    def __init__(self, num_heads, attn_bias_dim):
+        super(StructuralLinear, self).__init__()
+        self.linear_bias = nn.Linear(attn_bias_dim, num_heads)
+
+    def forward(self, attn_bias):
+        attn_bias = self.linear_bias(attn_bias.float())     # [b, s_total, s_total, h]
+        return attn_bias.permute(0, 3, 1, 2)                # [b, h, s_total, s_total]
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, hidden_size, attention_dropout_rate, num_heads, attn_bias_dim):
         super(MultiHeadAttention, self).__init__()
@@ -42,8 +66,8 @@ class MultiHeadAttention(nn.Module):
         self.linear_q = nn.Linear(hidden_size, num_heads * att_size)
         self.linear_k = nn.Linear(hidden_size, num_heads * att_size)
         self.linear_v = nn.Linear(hidden_size, num_heads * att_size)
-        # self.linear_bias = nn.Linear(attn_bias_dim, num_heads)
-        self.linear_bias = nn.Embedding(INF8+1, num_heads, padding_idx=INF8)
+        self.bias_enc = StructuralEmbedding(num_heads)
+        # self.bias_enc = StructuralLinear(num_heads, attn_bias_dim)
         self.att_dropout = nn.Dropout(attention_dropout_rate)
 
         self.output_layer = nn.Linear(num_heads * att_size, hidden_size)
@@ -59,14 +83,6 @@ class MultiHeadAttention(nn.Module):
         q = self.linear_q(q).view(batch_size, -1, self.num_heads, d_k)
         k = self.linear_k(k).view(batch_size, -1, self.num_heads, d_k)
         v = self.linear_v(v).view(batch_size, -1, self.num_heads, d_v)
-
-        # SPD PE
-        mask_off = (attn_bias == INF8)              # [b, s_total, s_total]
-        attn_bias = self.linear_bias(attn_bias)     # [b, s_total, s_total, h]
-        attn_bias[mask_off] = -torch.inf
-        attn_bias = attn_bias.permute(0, 3, 1, 2)   # [b, h, s_total, s_total]
-        # attn_bias = self.linear_bias(attn_bias).permute(0, 3, 1, 2)
-
         q = q.transpose(1, 2)                  # [b, h, q_len, d_k]
         v = v.transpose(1, 2)                  # [b, h, v_len, d_v]
         k = k.transpose(1, 2).transpose(2, 3)  # [b, h, d_k, k_len]
@@ -76,6 +92,7 @@ class MultiHeadAttention(nn.Module):
         q = q * self.scale
         x = torch.matmul(q, k)  # [b, h, q_len, k_len]
         if attn_bias is not None:
+            attn_bias = self.bias_enc(attn_bias)
             x = x + attn_bias
 
         x = torch.softmax(x, dim=3)
@@ -205,7 +222,6 @@ class GT(nn.Module):
 
     def forward(self, batched_data, perturb=None, get_score=False):
         attn_bias, x = batched_data.attn_bias, batched_data.x
-        # graph_attn_bias
         n_graph, n_node = x.size()[:2]
         graph_attn_bias = attn_bias.clone()         # [n_graph, n_node, n_node, hop]
         node_feature = self.node_encoder(x)         # [n_graph, n_node, n_hidden]

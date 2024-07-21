@@ -14,8 +14,7 @@ cdef class PyPLL:
 
     def construct_index(self, np.ndarray[uint32_t, ndim=2] edge_index, unsigned int K, bool directed):
         ns, nt = edge_index
-        self.c_pll.ConstructIndex(ns, nt, K, directed)
-        return self.c_pll.LoopCountTime() + self.c_pll.IndexingTime()
+        return self.c_pll.ConstructIndex(ns, nt, K, directed)
 
     def k_distance_query(self, int s, int t, unsigned int K):
         cdef vector[int] result

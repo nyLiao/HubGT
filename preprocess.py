@@ -1,3 +1,4 @@
+import os
 import logging
 from tqdm import tqdm
 from functools import partial
@@ -53,8 +54,10 @@ def process_data(args, res_logger=utils.ResLogger()):
     pw0, pw1, pw2 = utils.Stopwatch(), utils.Stopwatch(), utils.Stopwatch()
     spd = sp.coo_matrix((num_nodes, num_nodes), dtype=int,)
     ids = torch.zeros((num_nodes, args.ns, s_total), dtype=int)
+    # TODO: parallelize
     for iego, ego in enumerate(tqdm(id_map)):
         # Generate SPD neighborhood
+        # TODO: fix directed API
         pw0.start()
         with sw0:
             nodes0, val0, s0_actual = py_pll.label(ego)
@@ -66,7 +69,7 @@ def process_data(args, res_logger=utils.ResLogger()):
             nodes1, val1, s1_actual = py_pll.s_neighbor(ego, s1)
             val1 = np.array(val1) ** args.r1
             # nodes1, val1, s1_actual = py_pll.s_push(ego, s1, args.r1)
-            # TODO: reduce dulp for s_push
+            # TODO: reduce dupl for s_push
         s1 = min(s1, s1_actual)
         pw0.pause()
         pw1.start()
@@ -86,34 +89,44 @@ def process_data(args, res_logger=utils.ResLogger()):
             indices_i.append(np.vstack([s_row, s_col]))
         indices_i = np.hstack(indices_i)
         mask = (indices_i[0] < indices_i[1])
-        # TODO: random dropout
         indices_i = indices_i[:, mask]
         values_i = np.ones_like(indices_i[0], dtype=int)
-        spd_i = sp.coo_matrix(
+        spd += sp.coo_matrix(
             (values_i, indices_i),
             shape=(num_nodes, num_nodes),
         )
-        spd += spd_i
         pw1.pause()
 
     # SPD graph value
     pw2.start()
     spd.sum_duplicates()
     rows, cols, _ = sp.find(spd)
+    spd_bias = torch.zeros((len(rows), args.kbias), dtype=torch.int16)
     for i, (u, v) in enumerate(tqdm(zip(rows, cols), total=len(rows))):
         with sw_spd:
-            spd.data[i] = py_pll.k_distance_query(u, v, 1)[0]
-    # spd.data = spd.data.clip(0, INF8)
-    # spd.data = (spd.data * (float(INF8) / np.max(spd.data))).astype(int)
+            spd.data[i] = i
+            kspd = py_pll.k_distance_query(u, v, args.kbias)
+            if len(kspd) > 0:
+                spd_bias[i] = torch.tensor(kspd, dtype=int)
+
+    if args.kfeat > 0:
+        x_extend = torch.empty((x.size(0), args.kfeat), dtype=x.dtype).fill_(INF8)
+        for i in range(x.size(0)):
+            kspd = py_pll.k_distance_query(i, i, args.kfeat)
+            if len(kspd) > 0:
+                x_extend[i, :len(kspd)] = torch.tensor(kspd, dtype=x.dtype)
+        x_extend = (INF8 - x_extend) / INF8
+        x = torch.cat([x, x_extend], dim=1)
+        args.num_features = x.size(1)
     pw2.pause()
 
-    graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd.tocsr())
-    graph.contiguous('x', 'y')
+    graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd.tocsr(), spd_bias=spd_bias)
+    graph.contiguous('x', 'y', 'spd_bias')
     # os.makedirs('./dataset/' + args.data, exist_ok=True)
-    # torch.save(graph, './dataset/'+args.data+'/spd.pt')
+    # torch.save(graph, './dataset/'+args.data+'/graph.pt')
     # torch.save(ids, './dataset/'+args.data+'/ids.pt')
     print(pw0, pw1, pw2)
-    print(f'Labeling time: {sw0}, Neighbor time: {sw1}, SPD time: {sw_spd}, Size: {graph.num_edges}')
+    print(f'Labeling time: {sw0}, Neighbor time: {sw1}, SPD time: {sw_spd}, Size: {spd.nnz}')
 
     s = ''
     loader = {}

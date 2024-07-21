@@ -25,20 +25,22 @@ def collate(idx, ids, graph, std=0.0):
     idx = torch.stack(idx, dim=0).flatten()
     batch_size = idx.size(0)
     _, ns, s_total = ids.size()
+    kbias = graph.spd_bias.size(1)
     n_seq = batch_size * ns
 
     ids = ids[idx].view(n_seq, -1)  # [batch_size * ns, s_total]
     y = graph.y[ids[:, 0].view(-1)].view(-1)
 
-    attn_bias = torch.empty((n_seq, s_total, s_total), dtype=torch.int)
+    attn_bias = torch.empty((n_seq, s_total, s_total, kbias), dtype=torch.int16)
     for g, subnodes in enumerate(ids):
         spd_g = graph.spd[subnodes][:, subnodes].toarray()
         spd_g = spd_g + spd_g.T
         # Mask invalid distance
-        mask = ~np.eye(spd_g.shape[0], dtype=bool)
-        mask = mask & (spd_g <= 0)
-        spd_g[mask] = INF8
-        attn_bias[g] = torch.tensor(spd_g, dtype=torch.int)
+        attn_bias_g = graph.spd_bias[spd_g]
+        mask = ~torch.eye(spd_g.shape[0], dtype=bool).unsqueeze(2).expand(-1, -1, kbias)
+        mask = mask & (attn_bias_g <= 0)
+        attn_bias_g[mask] = INF8
+        attn_bias[g] = attn_bias_g
 
     x = graph.x[ids.view(-1)].view(n_seq, s_total, -1)
     if std > 0:

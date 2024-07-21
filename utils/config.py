@@ -46,7 +46,7 @@ def setup_argparse():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--seed', type=force_list_int, default=[42], help='random seed')
-    parser.add_argument('-v', '--device', type=int, default=3, help='which gpu to use if any (default: 0)')
+    parser.add_argument('-v', '--device', type=int, default=1, help='which gpu to use if any (default: 0)')
     parser.add_argument('-z', '--suffix', type=str, default=None, help='Save name suffix.')
     parser.add_argument('--loglevel', type=int, default=10, help='10:progress, 15:train, 20:info, 25:result')
     parser.add_argument('-quiet', action='store_true', help='Dry run without saving logs.')
@@ -73,7 +73,9 @@ def setup_argparse():
     parser.add_argument('--num_workers', type=int, default=16, help='number of loader workers')
     parser.add_argument('--perturb_std', type=float, default=0.0, help='perturb for training data')
     # Precompute configuration
-    parser.add_argument('--kindex', type=int, default=8, help='top-K PLL')
+    parser.add_argument('--kindex', type=int, default=8, help='top-K PLL indexing')
+    parser.add_argument('--kbias', type=int, default=1, help='top-K SPD for bias')
+    parser.add_argument('--kfeat', type=int, default=8, help='top-K SPD for feature')
     parser.add_argument('-ns', type=int, default=8, help='num of subgraphs')
     parser.add_argument('-ss', type=int, default=31, help='total num of nodes in each subgraph')
     parser.add_argument('-s0', type=int, default=15, help='max num of label nodes in each subgraph')

@@ -11,7 +11,7 @@ cdef extern from "kpll.hpp":
     cdef cppclass TopKPrunedLandmarkLabeling:
         TopKPrunedLandmarkLabeling() except+
 
-        bool ConstructIndex(vector[uint32_t] &, vector[uint32_t] &, uint8_t, bool)
+        float ConstructIndex(vector[uint32_t] &, vector[uint32_t] &, uint8_t, bool)
         int KDistanceQuery(int, int, uint8_t, vector[int] &);
         int Label(int, vector[int] &, vector[int] &)
         int SNeighbor(int, int, vector[int] &, vector[int] &)

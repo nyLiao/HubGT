@@ -58,7 +58,7 @@ ReAllocDistArray(size_t i, size_t nmemb){
   }
 }
 
-bool TopKPrunedLandmarkLabeling::
+float TopKPrunedLandmarkLabeling::
 ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K, bool directed){
   Free();
 
@@ -73,39 +73,54 @@ ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K,
   }
 
   // renaming
-  {
-    vector<std::pair<uint32_t, uint32_t> > deg(V, std::make_pair(0, 0));
+  vector<std::pair<uint32_t, uint32_t> > deg(V, std::make_pair(0, 0));
 
-    for (size_t i = 0; i < V; i++) deg[i].second = i;
+  for (size_t i = 0; i < V; i++) deg[i].second = i;
+  for (size_t i = 0; i < ns.size(); i++){
+    deg[ns[i]].first++;
+    deg[nt[i]].first++;
+  }
 
-    for (size_t i = 0; i < ns.size(); i++){
-      deg[ns[i]].first++;
-      deg[nt[i]].first++;
-    }
+  sort(deg.begin(), deg.end(), greater<pair<uint32_t, uint32_t> >());
+  alias.resize(V);
+  alias_inv.resize(V);
 
-    sort(deg.begin(), deg.end(), greater<pair<uint32_t, uint32_t> >());
-    alias.resize(V);
-    alias_inv.resize(V);
+  for (size_t i = 0; i < V; i++) {
+    alias[deg[i].second] = i;
+    alias_inv[i] = deg[i].second;
+  }
 
-    for (size_t i = 0; i < V; i++) {
-      alias[deg[i].second] = i;
-      alias_inv[i] = deg[i].second;
-    }
+  for (size_t i = 0; i < ns.size(); i++){
+    graph[0][alias[ns[i]]].push_back(alias[nt[i]]);
 
-    for (size_t i = 0; i < ns.size(); i++){
-      graph[0][alias[ns[i]]].push_back(alias[nt[i]]);
-
-      if (directed){
-        graph[1][alias[nt[i]]].push_back(alias[ns[i]]);
-      } else {
-        graph[0][alias[nt[i]]].push_back(alias[ns[i]]);
-      }
+    if (directed){
+      graph[1][alias[nt[i]]].push_back(alias[ns[i]]);
+    } else {
+      graph[0][alias[nt[i]]].push_back(alias[ns[i]]);
     }
   }
 
   Init();
 
-  return Labeling();
+  bool status = true;
+  loop_count_time = -GetCurrentTimeSec();
+  for(size_t v = 0; v < V; v++){
+    CountLoops(v, status);
+  }
+  loop_count_time += GetCurrentTimeSec();
+
+  indexing_time = -GetCurrentTimeSec();
+  for(size_t v = 0; v < V; v++){
+    // if (deg[v].first <= 2) break;
+    PrunedBfs(v, false, status);
+    if (directed){
+      PrunedBfs(v, true, status);
+    }
+  }
+  indexing_time += GetCurrentTimeSec();
+
+  cout << "Loop count time: " << loop_count_time << ", Indexing time: " << indexing_time << endl;
+  return loop_count_time + indexing_time;
 }
 
 TopKPrunedLandmarkLabeling::
@@ -373,34 +388,6 @@ Free(){
   }
 }
 
-bool TopKPrunedLandmarkLabeling::
-Labeling(){
-
-  bool status = true;
-
-  loop_count_time = -GetCurrentTimeSec();
-  for(size_t v = 0; v < V; v++){
-    CountLoops(v, status);
-  }
-  loop_count_time += GetCurrentTimeSec();
-
-  indexing_time = -GetCurrentTimeSec();
-  for(size_t v = 0; v < V; v++){
-
-    // compute L_in
-    PrunedBfs(v, false, status);
-
-    if (directed){
-      //  compute L_out
-      PrunedBfs(v, true, status);
-    }
-  }
-  indexing_time += GetCurrentTimeSec();
-
-  cout << "Loop count time: " << loop_count_time << ", Indexing time: " << indexing_time << endl;
-  return status;
-}
-
 void TopKPrunedLandmarkLabeling::
 CountLoops(uint32_t s, bool &status){
   size_t  count = 0;
@@ -500,7 +487,6 @@ PrunedBfs(uint32_t s, bool rev, bool &status){
         tmp_offset[v] = dist;
         AllocLabel(v, s, dist, c, rev);
       }else{
-        // assert(s != 3);
         ExtendLabel(v, s, dist, c, rev);
       }
 
@@ -519,7 +505,7 @@ PrunedBfs(uint32_t s, bool rev, bool &status){
     }
 
     if (node_que[next].empty()) break;
-    // if (dist > 2*K) break;
+    if (dist > 4*K) break;
     swap(curr, next);
     dist++;
   }

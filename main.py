@@ -80,7 +80,7 @@ def main(args):
         input_dim=args.num_features,
         hidden_dim=args.hidden_dim,
         output_dim=args.num_classes,
-        attn_bias_dim=1,
+        attn_bias_dim=args.kbias,
         attention_dropout_rate=args.attention_dropout_rate,
         dropout_rate=args.dropout_rate,
         intput_dropout_rate=args.intput_dropout_rate,

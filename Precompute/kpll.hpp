@@ -42,7 +42,7 @@ public:
   int KDistanceQuery(int s, int t, uint8_t k);
   int KDistanceQuery(int s, int t){ return KDistanceQuery(s, t, K); }
 
-  bool ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t K, bool directed);
+  float ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t K, bool directed);
   int Label(int v, std::vector<int> &pos, std::vector<int> &dist);
   int SNeighbor(int v, int size, std::vector<int> &pos, std::vector<int> &dist);
   int SPush(int v, int size, float alpha, std::vector<int> &pos, std::vector<float> &dist);
@@ -79,7 +79,6 @@ private:
 
   void Init();
   void Free();
-  bool Labeling();
   void CountLoops(uint32_t s, bool &status);
   void PrunedBfs (uint32_t s, bool dir, bool &status);
   inline void SetStartTempVars(uint32_t s, bool rev);
