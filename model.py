@@ -31,31 +31,61 @@ class FeedForwardNetwork(nn.Module):
 
 
 class StructuralEmbedding(nn.Module):
-    def __init__(self, num_heads):
+    def __init__(self, num_heads, num_global_node):
         super(StructuralEmbedding, self).__init__()
+        self.num_global_node = num_global_node
         self.linear_bias = nn.Embedding(INF8+1, num_heads, padding_idx=INF8)
+        if self.num_global_node > 0:
+            self.virtual_bias = nn.Embedding(self.num_global_node, num_heads)
 
     def forward(self, attn_bias):
-        # assert attn_bias.size(3) == 1
+        # assert attn_bias.size(3) == 1     # attn_bias_dim == 1
         attn_bias = attn_bias.squeeze(3)
+        n_graph, n_node = attn_bias.size()[:2]
+
         mask_off = (attn_bias == INF8)                      # [b, s_total, s_total]
         attn_bias = self.linear_bias(attn_bias.int())       # [b, s_total, s_total, h]
         attn_bias[mask_off] = -torch.inf
-        return attn_bias.permute(0, 3, 1, 2)                # [b, h, s_total, s_total]
+
+        # Append virtual node
+        if self.num_global_node > 0:
+            vnode_attn_bias = self.virtual_bias.weight.unsqueeze(0)
+            attn_bias = torch.cat([                         # [b, s_total+nv, s_total, h]
+                attn_bias,
+                vnode_attn_bias.unsqueeze(2).repeat(n_graph, 1, n_node, 1)], dim=1)
+            attn_bias = torch.cat([                         # [b, s_total+nv, s_total+nv, h]
+                attn_bias,
+                vnode_attn_bias.unsqueeze(0).repeat(n_graph, n_node+self.num_global_node, 1, 1)], dim=2)
+
+        return attn_bias.permute(0, 3, 1, 2)                # [b, h, s_total+nv, s_total+nv]
 
 
 class StructuralLinear(nn.Module):
-    def __init__(self, num_heads, attn_bias_dim):
+    def __init__(self, num_heads, attn_bias_dim, num_global_node):
         super(StructuralLinear, self).__init__()
+        self.num_global_node = num_global_node
         self.linear_bias = nn.Linear(attn_bias_dim, num_heads)
+        if self.num_global_node > 0:
+            self.virtual_bias = nn.Embedding(self.num_global_node, attn_bias_dim)
 
     def forward(self, attn_bias):
+        # Append virtual node
+        if self.num_global_node > 0:
+            n_graph, n_node = attn_bias.size()[:2]
+            vnode_attn_bias = self.virtual_bias.weight.unsqueeze(0)
+            attn_bias = torch.cat([
+                attn_bias,
+                vnode_attn_bias.unsqueeze(2).repeat(n_graph, 1, n_node, 1)], dim=1)
+            attn_bias = torch.cat([
+                attn_bias,
+                vnode_attn_bias.unsqueeze(0).repeat(n_graph, n_node+self.num_global_node, 1, 1)], dim=2)
+
         attn_bias = self.linear_bias(attn_bias.float())     # [b, s_total, s_total, h]
         return attn_bias.permute(0, 3, 1, 2)                # [b, h, s_total, s_total]
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, hidden_size, attention_dropout_rate, num_heads, attn_bias_dim):
+    def __init__(self, hidden_size, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node):
         super(MultiHeadAttention, self).__init__()
 
         self.num_heads = num_heads
@@ -66,8 +96,8 @@ class MultiHeadAttention(nn.Module):
         self.linear_q = nn.Linear(hidden_size, num_heads * att_size)
         self.linear_k = nn.Linear(hidden_size, num_heads * att_size)
         self.linear_v = nn.Linear(hidden_size, num_heads * att_size)
-        self.bias_enc = StructuralEmbedding(num_heads)
-        # self.bias_enc = StructuralLinear(num_heads, attn_bias_dim)
+        self.bias_enc = StructuralEmbedding(num_heads, num_global_node)
+        # self.bias_enc = StructuralLinear(num_heads, attn_bias_dim, num_global_node)
         self.att_dropout = nn.Dropout(attention_dropout_rate)
 
         self.output_layer = nn.Linear(num_heads * att_size, hidden_size)
@@ -114,12 +144,12 @@ class MultiHeadAttention(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, hidden_size, ffn_size, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim):
+    def __init__(self, hidden_size, ffn_size, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node):
         super(EncoderLayer, self).__init__()
 
         self.self_attention_norm = nn.LayerNorm(hidden_size)
         self.self_attention = MultiHeadAttention(
-            hidden_size, attention_dropout_rate, num_heads, attn_bias_dim)
+            hidden_size, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node)
         self.self_attention_dropout = nn.Dropout(dropout_rate)
 
         self.ffn_norm = nn.LayerNorm(hidden_size)
@@ -206,18 +236,21 @@ class GT(nn.Module):
         super().__init__()
 
         self.num_heads = num_heads
-        self.node_encoder = nn.Linear(input_dim, hidden_dim)
-        self.input_dropout = nn.Dropout(intput_dropout_rate)
-        encoders = [EncoderLayer(hidden_dim, ffn_dim, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim)
-                    for _ in range(n_layers)]
-        self.layers = nn.ModuleList(encoders)
         self.n_layers = n_layers
-        self.final_ln = nn.LayerNorm(hidden_dim)
-        self.downstream_out_proj = nn.Linear(hidden_dim, output_dim)
         self.hidden_dim = hidden_dim
         self.num_global_node = num_global_node
-        self.graph_token = nn.Embedding(self.num_global_node, hidden_dim)
-        self.graph_token_virtual_distance = nn.Embedding(self.num_global_node, attn_bias_dim)
+        if self.num_global_node > 0:
+            self.virtual_feat = nn.Embedding(self.num_global_node, hidden_dim)
+
+        self.node_encoder = nn.Linear(input_dim, hidden_dim)
+        self.input_dropout = nn.Dropout(intput_dropout_rate)
+        encoders = [EncoderLayer(hidden_dim, ffn_dim, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node)
+                    for _ in range(n_layers)]
+        self.layers = nn.ModuleList(encoders)
+        self.final_ln = nn.LayerNorm(hidden_dim)
+        # self.downstream_out_proj = nn.Linear(hidden_dim*8, output_dim)
+        self.downstream_out_proj = nn.Linear(hidden_dim, output_dim)
+
         self.apply(lambda module: init_params(module, n_layers=n_layers))
 
     def forward(self, batched_data, perturb=None, get_score=False):
@@ -228,15 +261,9 @@ class GT(nn.Module):
         if perturb is not None:
             node_feature += perturb
 
-        # global_node_feature = self.graph_token.weight.unsqueeze(0).repeat(n_graph, 1, 1)
-        # node_feature = torch.cat([node_feature, global_node_feature], dim=1)
-
-        # graph_attn_bias = graph_attn_bias.unsqueeze(-1)
-        # graph_attn_bias = torch.cat([graph_attn_bias, self.graph_token_virtual_distance.weight.unsqueeze(0).unsqueeze(2).
-        #                              repeat(n_graph, 1, n_node, 1)], dim=1)
-        # graph_attn_bias = torch.cat(
-        #     [graph_attn_bias, self.graph_token_virtual_distance.weight.unsqueeze(0).unsqueeze(0).
-        #     repeat(n_graph, n_node+self.num_global_node, 1, 1)], dim=2)
+        if self.num_global_node > 0:
+            vnode_feature = self.virtual_feat.weight.unsqueeze(0).repeat(n_graph, 1, 1)
+            node_feature = torch.cat([node_feature, vnode_feature], dim=1)
 
         # transfomrer encoder
         output = self.input_dropout(node_feature)
@@ -249,8 +276,10 @@ class GT(nn.Module):
             return score
         for enc_layer in self.layers:
             output = enc_layer(output, graph_attn_bias)
-        output = self.final_ln(output)
+        output = self.final_ln(output)              # [n_graph, n_node, n_hidden]
 
         # output part
+        # output = output[:, 0, :].reshape(-1, self.hidden_dim*8)
+        # output = self.downstream_out_proj(output)
         output = self.downstream_out_proj(output[:, 0, :])
         return F.log_softmax(output, dim=1)

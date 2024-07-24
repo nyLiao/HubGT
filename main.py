@@ -68,6 +68,7 @@ def main(args):
     res_logger.concat([('seed', args.seed),])
 
     # ========== Load data
+    args.ss = args.ss - args.num_global_node
     loader = process_data(args, res_logger)
     with args.device:
         torch.cuda.empty_cache()
@@ -107,6 +108,7 @@ def main(args):
             patience=args.patience,
             period=1,
             prefix=('-'.join(filter(None, ['model', args.suffix]))),)
+    logger.log(logging.LTRN, f'Total params: {utils.ParamNumel(model)(unit='K')} K')
 
     # ========== Run training
     logger.debug('-'*20 + f" Start training: {args.epoch} " + '-'*20)

@@ -58,7 +58,6 @@ def setup_argparse():
     parser.add_argument('--intput_dropout_rate', type=float, default=0.1)
     parser.add_argument('--dropout_rate', type=float, default=0.5)
     parser.add_argument('--attention_dropout_rate', type=float, default=0.5)
-    parser.add_argument('--num_global_node', type=int, default=1)
     # Optim configuration
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('-e', '--epoch', type=int, default=200)
@@ -77,8 +76,9 @@ def setup_argparse():
     parser.add_argument('--kbias', type=int, default=1, help='top-K SPD for bias')
     parser.add_argument('--kfeat', type=int, default=8, help='top-K SPD for feature')
     parser.add_argument('-ns', type=int, default=8, help='num of subgraphs')
-    parser.add_argument('-ss', type=int, default=31, help='total num of nodes in each subgraph')
-    parser.add_argument('-s0', type=int, default=15, help='max num of label nodes in each subgraph')
+    parser.add_argument('-ss', type=int, default=32, help='total num of nodes in each subgraph')
+    parser.add_argument('--num_global_node', type=int, default=0)
+    parser.add_argument('-s0', type=int, default=16, help='max num of label nodes in each subgraph')
     parser.add_argument('-r0', type=float, default=-1.0, help='norm for label distance')
     parser.add_argument('-r1', type=float, default=-1.0, help='norm for neighbor distance')
     return parser

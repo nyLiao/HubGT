@@ -256,7 +256,7 @@ SPush(int v, int size, float alpha, vector<int> &pos, vector<float> &dist){
 
   while (!node_que.empty()){
     uint32_t u = node_que.front();
-    uint8_t  d = dist_que.front();
+    float    d = dist_que.front();
     node_que.pop();
     dist_que.pop();
     if (count >= size) break;
