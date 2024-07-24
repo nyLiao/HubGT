@@ -44,5 +44,6 @@ def collate(idx, ids, graph, std=0.0):
 
     x = graph.x[ids.view(-1)].view(n_seq, s_total, -1)
     if std > 0:
-        x += torch.normal(0, std, x.shape, device=x.device, dtype=x.dtype)
+        norm = torch.norm(x)
+        x += torch.normal(0, std * norm, x.shape, device=x.device, dtype=x.dtype)
     return Batch(attn_bias, x, y)

@@ -55,6 +55,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     s_total = args.ss
     spd = sp.coo_matrix((num_nodes, num_nodes), dtype=int,)
     ids = torch.zeros((num_nodes, args.ns, s_total), dtype=int)
+    n1_lst = {e: [] for e in range(num_nodes)}
     # TODO: parallelize
     for iego, ego in enumerate(tqdm(id_map)):
         stopwatch_sample.start()
@@ -63,22 +64,31 @@ def process_data(args, res_logger=utils.ResLogger()):
         nodes0, val0, s0_actual = py_pll.label(ego)
         val0 = np.array(val0) ** args.r0
         val0[val0 == np.inf] = 0
+        for node, val in zip(nodes0, val0):
+            n1_lst[node].append((int(ego), val))
         s0 = min(args.s0, s0_actual)
 
-        s1 = s_total - s0 - 1
-        nodes1, val1, s1_actual = py_pll.s_neighbor(ego, s1)
-        val1 = np.array(val1) ** args.r1
-        # nodes1, val1, s1_actual = py_pll.s_push(ego, s1, args.r1)
-        # nodes1, inv_n = np.unique(nodes1, return_inverse=True)
-        # val1_temp = np.zeros_like(nodes1, dtype=np.float32)
-        # np.add.at(val1_temp, inv_n, val1)
-        # val1 = val1_temp
-        s1 = min(s1, s1_actual)
+        s1_actual = len(n1_lst[int(ego)])
+        if s1_actual > 0:
+            nodes1, val1 = zip(*n1_lst[int(ego)])
+            nodes1 = list(nodes1)
+            val1 = np.array(val1) ** args.r0
+        s1 = min(args.s1, s1_actual)
+
+        s2 = s_total - s0 - s1 - 1
+        s2_actual = 0
+        if s2 > 0:
+            nodes2, val2, s2_actual = py_pll.s_neighbor(ego, s2)
+            val2 = np.array(val2) ** args.r1
+        s2 = min(s2, s2_actual)
 
         # Sample neighbors
         ids_i = np.full((args.ns, s_total), ego, dtype=np.int16)
         ids_i[:, 1:s0+1] = choice_cap(nodes0, s0, args.ns, val0)
-        ids_i[:, s0+1:s0+s1+1] = choice_cap(nodes1, s1, args.ns, val1)
+        if s1 > 0:
+            ids_i[:, s0+1:s0+s1+1] = choice_cap(nodes1, s1, args.ns, val1)
+        if s2 > 0:
+            ids_i[:, s0+s1+1:s0+s1+s2+1] = choice_cap(nodes2, s2, args.ns, val2)
         ids[ego] = torch.tensor(ids_i, dtype=int)
 
         # Append SPD indices
