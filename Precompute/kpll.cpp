@@ -66,7 +66,7 @@ ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K,
   this->K = K;
   this->directed = directed;
   V = std::max(*max_element(ns.begin(), ns.end()), *max_element(nt.begin(), nt.end())) + 1;
-  cout << "Nodes: " << V << ", Edges: " << ns.size() << ", K: " << K << ", Directed: " << directed << endl;
+  // cout << "Nodes: " << V << ", Edges: " << ns.size() << ", K: " << K << ", Directed: " << directed << endl;
 
   for (int dir = 0; dir < 1 + directed; dir++){
     graph[dir].resize(V);
@@ -119,7 +119,7 @@ ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K,
   }
   indexing_time += GetCurrentTimeSec();
 
-  cout << "Loop count time: " << loop_count_time << ", Indexing time: " << indexing_time << endl;
+  // cout << "Loop count time: " << loop_count_time << ", Indexing time: " << indexing_time << endl;
   return loop_count_time + indexing_time;
 }
 

@@ -153,6 +153,7 @@ def main(args):
     res_logger.save()
     utils.save_args(args.logpath, vars(args))
     utils.clear_logger(logger)
+    return res_logger.data.loc[0, args.metric+'_val']
 
 
 if __name__ == "__main__":

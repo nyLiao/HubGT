@@ -57,7 +57,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     ids = torch.zeros((num_nodes, args.ns, s_total), dtype=int)
     n1_lst = {e: [] for e in range(num_nodes)}
     # TODO: parallelize
-    for iego, ego in enumerate(tqdm(id_map)):
+    for iego, ego in enumerate(tqdm(id_map, disable=args.quiet)):
         stopwatch_sample.start()
         # Generate SPD neighborhood
         # TODO: fix directed API
@@ -112,7 +112,8 @@ def process_data(args, res_logger=utils.ResLogger()):
     spd.sum_duplicates()
     rows, cols, _ = sp.find(spd)
     spd_bias = torch.zeros((len(rows), args.kbias), dtype=torch.int16)
-    for i, (u, v) in enumerate(tqdm(zip(rows, cols), total=len(rows))):
+    # for i, (u, v) in enumerate(tqdm(zip(rows, cols), total=len(rows))):
+    for i, (u, v) in enumerate(zip(rows, cols)):
         stopwatch_spd.start()
         spd.data[i] = i
         kspd = py_pll.k_distance_query(u, v, args.kbias)
