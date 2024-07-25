@@ -129,7 +129,7 @@ def main(args):
         logger.log(logging.LTRN, res_learn.get_str(row=epoch))
 
         ckpt_logger.step(metric_val, model)
-        ckpt_logger.set_at_best(epoch_best=epoch)
+        ckpt_logger.set_at_best(**{'epoch_best': epoch, args.metric+'_val': metric_val})
         if ckpt_logger.is_early_stop:
             break
 

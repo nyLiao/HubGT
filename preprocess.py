@@ -64,8 +64,9 @@ def process_data(args, res_logger=utils.ResLogger()):
         nodes0, val0, s0_actual = py_pll.label(ego)
         val0 = np.array(val0) ** args.r0
         val0[val0 == np.inf] = 0
-        for node, val in zip(nodes0, val0):
-            n1_lst[node].append((int(ego), val))
+        if args.s1 > 0:
+            for node, val in zip(nodes0, val0):
+                n1_lst[node].append((int(ego), val))
         s0 = min(args.s0, s0_actual)
 
         s1_actual = len(n1_lst[int(ego)])

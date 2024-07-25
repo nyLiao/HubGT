@@ -18,16 +18,16 @@ from main import learn, eval
 
 
 def objective(trial, args, logger, res_logger):
-    args = deepcopy(args)
     res_logger = deepcopy(res_logger)
-    args.perturb_std = trial.suggest_float('perturb_std', 0.0, 0.05, step=0.001)
-    args.kfeat = trial.suggest_categorical('kfeat', [0, 4, 8])
-    args.ns = trial.suggest_int('ns', 2, 8, step=2)
-    args.num_global_node = trial.suggest_int('num_global_node', 0, 1)
+    args = deepcopy(args)
+    # args.perturb_std = trial.suggest_float('perturb_std', 0.0, 0.05, step=0.001)
+    args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
+    args.ns = trial.suggest_int('ns', 2, 10, step=2)
+    args.num_global_node = trial.suggest_int('num_global_node', 0, 4)
     args.s0 = trial.suggest_int('s0', 0, 22, step=2)
     args.s1 = trial.suggest_int('s1', 0, 8, step=2)
-    args.r0 = trial.suggest_float('r0', -2.0, 2.0, step=0.1)
-    args.r1 = trial.suggest_float('r1', -2.0, 2.0, step=0.1)
+    args.r0 = trial.suggest_float('r0', -2.0, 2.0, step=0.2)
+    args.r1 = trial.suggest_float('r1', -2.0, 2.0, step=0.2)
     for k in trial.params:
         res_logger.concat([(k, trial.params[k])])
     logger.log(logging.LTRN, trial.params)
@@ -121,6 +121,7 @@ def objective(trial, args, logger, res_logger):
     logger.info(f"[args]: {args}")
     logger.log(logging.LRES, f"[res]: {res_logger}")
     res_logger.save()
+    trial.set_user_attr("s_test", res_logger._get(col=args.metric+'_test', row=0))
     return res_logger.data.loc[0, args.metric+'_val']
 
 

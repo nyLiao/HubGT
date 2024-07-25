@@ -19,7 +19,7 @@ ARGS_S=(
 )
 
 # DATAS=("cora" "citeseer" "pubmed" )
-DATAS=("citeseer")
+DATAS=("citeseer" "pubmed")
 for data in ${DATAS[@]}; do
     python main_tune.py --data $data "${ARGS_P[@]}"
 done
