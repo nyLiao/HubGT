@@ -8,8 +8,8 @@ from argparse import Namespace
 from torchmetrics import MetricCollection
 from torchmetrics.classification import (
     MulticlassAccuracy, MultilabelAccuracy,
-    MulticlassF1Score, MultilabelF1Score,
-    MulticlassAUROC, MultilabelAUROC,
+    MulticlassF1Score, MultilabelF1Score, BinaryF1Score,
+    MulticlassAUROC, MultilabelAUROC, BinaryAUROC,
     MulticlassAveragePrecision, MultilabelAveragePrecision,
 )
 
@@ -36,6 +36,14 @@ def get_evaluator(args: Namespace) -> MetricCollection:
             # 's_f1a': MultilabelF1Score(num_labels=args.num_classes, average='macro'),
             's_auroc': MultilabelAUROC(num_classes=args.num_classes),
             # 's_ap': MultilabelAveragePrecision(num_classes=args.num_classes),
+        })
+    elif args.num_classes == 1:
+        metric = ResCollection({
+            # 's_acc': MulticlassAccuracy(num_classes=args.num_classes),
+            's_f1i': BinaryF1Score(),
+            # 's_f1a': MulticlassF1Score(num_classes=args.num_classes, average='macro'),
+            's_auroc': BinaryAUROC(),
+            # 's_ap': MulticlassAveragePrecision(num_classes=args.num_classes),
         })
     else:
         metric = ResCollection({

@@ -122,6 +122,7 @@ class MultiHeadAttention(nn.Module):
         q = q * self.scale
         x = torch.matmul(q, k)  # [b, h, q_len, k_len]
         if attn_bias is not None:
+            # TODO: dropout
             attn_bias = self.bias_enc(attn_bias)
             x = x + attn_bias
 

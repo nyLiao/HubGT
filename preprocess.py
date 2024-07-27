@@ -4,6 +4,7 @@ from tqdm import tqdm
 from functools import partial
 import numpy as np
 import scipy.sparse as sp
+from multiprocessing import Pool
 
 import torch
 from torch.utils.data import DataLoader
@@ -26,6 +27,28 @@ def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
     return np.vstack(ret)
 
 
+def aggr_csr(chunk):
+    num_nodes, ids_chunk = chunk
+    # Dense connection in each subgraph
+    spd = sp.csr_matrix((num_nodes, num_nodes), dtype=int,)
+    for ids_i in ids_chunk:
+        indices_i = []
+        for ids_s in ids_i.numpy():
+            subset = np.unique(ids_s)
+            s_row, s_col = np.triu_indices(len(subset), 1)
+            s_row, s_col = subset[s_row], subset[s_col]
+            indices_i.append(np.vstack([s_row, s_col]))
+        indices_i = np.hstack(indices_i)
+        mask = (indices_i[0] < indices_i[1])
+        indices_i = indices_i[:, mask]
+        values_i = np.ones_like(indices_i[0], dtype=int)
+        spd += sp.coo_matrix(
+            (values_i, indices_i),
+            shape=(num_nodes, num_nodes),
+        ).tocsr()
+    return spd
+
+
 def process_data(args, res_logger=utils.ResLogger()):
     logger = logging.getLogger('log')
     data_loader = SingleGraphLoader(args)
@@ -46,6 +69,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     id_map_inv = torch.empty_like(id_map)
     id_map_inv[id_map] = torch.arange(num_nodes)
 
+    # ===== Build label
     py_pll = PyPLL()
     edge_index = data.edge_index.numpy().astype(np.uint32)
     time_pre = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
@@ -54,13 +78,11 @@ def process_data(args, res_logger=utils.ResLogger()):
 
     stopwatch_sample, stopwatch_spd = utils.Stopwatch(), utils.Stopwatch()
     s_total = args.ss
-    spd = sp.coo_matrix((num_nodes, num_nodes), dtype=int,)
     ids = torch.zeros((num_nodes, args.ns, s_total), dtype=int)
     n1_lst = {e: [] for e in range(num_nodes)}
-    # TODO: parallelize
     for iego, ego in enumerate(tqdm(id_map, disable=args.quiet)):
         stopwatch_sample.start()
-        # Generate SPD neighborhood
+        # ===== Generate SPD neighborhood
         # TODO: fix directed API
         nodes0, val0, s0_actual = py_pll.label(ego)
         val0 = np.array(val0) ** args.r0
@@ -84,7 +106,7 @@ def process_data(args, res_logger=utils.ResLogger()):
             val2 = np.array(val2) ** args.r1
         s2 = min(s2, s2_actual)
 
-        # Sample neighbors
+        # ===== Sample neighbors
         ids_i = np.full((args.ns, s_total), ego, dtype=np.int64)
         ids_i[:, 1:s0+1] = choice_cap(nodes0, s0, args.ns, val0)
         if s1 > 0:
@@ -93,36 +115,28 @@ def process_data(args, res_logger=utils.ResLogger()):
             ids_i[:, s0+s1+1:s0+s1+s2+1] = choice_cap(nodes2, s2, args.ns, val2)
         ids[ego] = torch.tensor(ids_i, dtype=int)
 
-        # Append SPD indices
-        indices_i = []
-        for ids_s in ids_i:
-            subset = np.unique(ids_s)
-            s_row, s_col = np.triu_indices(len(subset), 1)
-            s_row, s_col = subset[s_row], subset[s_col]
-            indices_i.append(np.vstack([s_row, s_col]))
-        indices_i = np.hstack(indices_i)
-        mask = (indices_i[0] < indices_i[1])
-        indices_i = indices_i[:, mask]
-        values_i = np.ones_like(indices_i[0], dtype=int)
-        spd += sp.coo_matrix(
-            (values_i, indices_i),
-            shape=(num_nodes, num_nodes),
-        )
         stopwatch_sample.pause()
 
-    # SPD graph value
+    # ===== Aggregate SPD graph
+    id_map = torch.randperm(num_nodes).split(num_nodes // args.num_workers)
+    ids_chunks = [(num_nodes, ids[id_i]) for id_i in id_map]
+    with Pool(args.num_workers) as pool:
+        spd_t = pool.map(aggr_csr, ids_chunks)
+
+    spd = sum(spd_i for spd_i in spd_t)
     spd.sum_duplicates()
     rows, cols, _ = sp.find(spd)
+    spd.data = np.arange(len(rows), dtype=int)
+
     spd_bias = torch.zeros((len(rows), args.kbias), dtype=int)
-    # for i, (u, v) in enumerate(tqdm(zip(rows, cols), total=len(rows))):
     for i, (u, v) in enumerate(zip(rows, cols)):
         stopwatch_spd.start()
-        spd.data[i] = i
         kspd = py_pll.k_distance_query(u, v, args.kbias)
         if len(kspd) > 0:
             spd_bias[i] = torch.tensor(kspd, dtype=int)
         stopwatch_spd.pause()
 
+    # ===== Extend features
     if args.kfeat > 0:
         x_extend = torch.empty((x.size(0), args.kfeat), dtype=x.dtype).fill_(INF8)
         for i in range(x.size(0)):
@@ -135,6 +149,7 @@ def process_data(args, res_logger=utils.ResLogger()):
         x = torch.cat([x, x_extend], dim=1)
         args.num_features = x.size(1)
 
+    # ===== Data loader
     graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd.tocsr(), spd_bias=spd_bias)
     graph.contiguous('x', 'y', 'spd_bias')
     # os.makedirs('./dataset/' + args.data, exist_ok=True)
