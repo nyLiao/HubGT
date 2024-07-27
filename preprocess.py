@@ -16,8 +16,6 @@ import utils
 from utils.collator import collate, INF8
 from Precompute import PyPLL
 
-logging.LTRN = 15
-
 
 def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
     if len(a) <= size:
@@ -121,30 +119,23 @@ def process_data(args, res_logger=utils.ResLogger()):
     id_map = torch.randperm(num_nodes).split(num_nodes // args.num_workers)
     ids_chunks = [(num_nodes, ids[id_i]) for id_i in id_map]
     with Pool(args.num_workers) as pool:
-        spd_t = pool.map(aggr_csr, ids_chunks)
+        spd = pool.map(aggr_csr, ids_chunks)
 
-    spd = sum(spd_i for spd_i in spd_t)
+    spd = sum(spd)
     spd.sum_duplicates()
     rows, cols, _ = sp.find(spd)
+    rows, cols = rows.astype(np.uint32), cols.astype(np.uint32)
     spd.data = np.arange(len(rows), dtype=int)
-
-    spd_bias = torch.zeros((len(rows), args.kbias), dtype=int)
-    for i, (u, v) in enumerate(zip(rows, cols)):
-        stopwatch_spd.start()
-        kspd = py_pll.k_distance_query(u, v, args.kbias)
-        if len(kspd) > 0:
-            spd_bias[i] = torch.tensor(kspd, dtype=int)
-        stopwatch_spd.pause()
+    with stopwatch_spd:
+        spd_bias = py_pll.k_distance_parallel(rows, cols, args.kbias)
+    spd_bias = torch.tensor(spd_bias, dtype=int).view(-1, args.kbias)
 
     # ===== Extend features
     if args.kfeat > 0:
-        x_extend = torch.empty((x.size(0), args.kfeat), dtype=x.dtype).fill_(INF8)
-        for i in range(x.size(0)):
-            stopwatch_spd.start()
-            kspd = py_pll.k_distance_query(i, i, args.kfeat)
-            if len(kspd) > 0:
-                x_extend[i, :len(kspd)] = torch.tensor(kspd, dtype=x.dtype)
-            stopwatch_spd.pause()
+        rows = cols = np.arange(x.size(0), dtype=np.uint32)
+        with stopwatch_spd:
+            x_extend = py_pll.k_distance_parallel(rows, cols, args.kfeat)
+        x_extend = torch.tensor(x_extend, dtype=torch.float32).view(-1, args.kfeat)
         x_extend = (INF8 - x_extend) / INF8
         x = torch.cat([x, x_extend], dim=1)
         args.num_features = x.size(1)
@@ -186,5 +177,8 @@ def process_data(args, res_logger=utils.ResLogger()):
 
 
 if __name__ == '__main__':
+    logging.LTRN = 15
     args = utils.setup_args(utils.setup_argparse())
+    np.random.seed(args.seed[0])
+    logger = utils.setup_logger(level_file=30, quiet=args.quiet)
     process_data(args)

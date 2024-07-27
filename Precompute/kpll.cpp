@@ -5,19 +5,21 @@
 #include <cassert>
 #include <cstdlib>
 #include <queue>
+#include <thread>
 #include <algorithm>
+#include <cmath>
 #include <memory.h>
 using namespace std;
 
-const uint8_t TopKPrunedLandmarkLabeling::INF8 = std::numeric_limits<uint8_t>::max() / 2;
+const uint8_t TopKPrunedLandmarkLabeling::INF8 = numeric_limits<uint8_t>::max() / 2;
 
 template <typename T> inline bool ReAlloc(T*& ptr, size_t nmemb){
   ptr = (T*)realloc(ptr, nmemb * sizeof(T));
   return ptr != NULL;
 }
 
-template <typename T> inline void EraseVector(std::vector<T> &vec){
-  std::vector<T>().swap(vec);
+template <typename T> inline void EraseVector(vector<T> &vec){
+  vector<T>().swap(vec);
 }
 
 
@@ -53,7 +55,7 @@ ReAllocDistArray(size_t i, size_t nmemb){
     da.offset[off] = n;
     return ReAlloc(da.addr, n);
   }else{
-    assert(da.addr[da.offset[off] - 1] == std::numeric_limits<uint8_t>::max() / 2);
+    assert(da.addr[da.offset[off] - 1] == numeric_limits<uint8_t>::max() / 2);
     return true;
   }
 }
@@ -66,7 +68,7 @@ ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K,
   this->K = K;
   this->directed = directed;
   this->quiet = quiet;
-  V = std::max(*max_element(ns.begin(), ns.end()), *max_element(nt.begin(), nt.end())) + 1;
+  V = max(*max_element(ns.begin(), ns.end()), *max_element(nt.begin(), nt.end())) + 1;
   if (!quiet) cout << "Nodes: " << V << ", Edges: " << ns.size() << ", K: " << K << ", Directed: " << directed << endl;
 
   for (int dir = 0; dir < 1 + directed; dir++){
@@ -74,7 +76,7 @@ ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K,
   }
 
   // renaming
-  vector<std::pair<uint32_t, uint32_t> > deg(V, std::make_pair(0, 0));
+  vector<pair<uint32_t, uint32_t> > deg(V, make_pair(0, 0));
 
   for (size_t i = 0; i < V; i++) deg[i].second = i;
   for (size_t i = 0; i < ns.size(); i++){
@@ -142,14 +144,17 @@ KDistanceQuery(int s, int t, uint8_t k){
 
 int TopKPrunedLandmarkLabeling::
 KDistanceQuery(int s, int t, uint8_t k, vector<int> &ret){
-  ret.clear();
+  return KDistanceQuery(s, t, k, ret.begin());
+}
+
+int TopKPrunedLandmarkLabeling::
+KDistanceQuery(int s, int t, uint8_t k, vector<int>::iterator ret_begin){
   s = alias[s];
   t = alias[t];
   size_t pos1 = 0;
   size_t pos2 = 0;
 
-  vector<int> count(30, 0);
-  // cerr << directed << " " << s << " " << t << endl;
+  vector<int> count(32, 0);
   const index_t &ids = index[directed][s];
   const index_t &idt = index[0][t];
 
@@ -184,13 +189,47 @@ KDistanceQuery(int s, int t, uint8_t k, vector<int> &ret){
     }
   }
 
-  for (size_t i = 0; i < count.size(); i++){
-    while (ret.size() < k && count[i]-- > 0){
-      ret.push_back(i);
+  size_t i = 0;
+  int len = 0;
+  for (auto it = ret_begin; it < ret_begin + k; it++){
+    while (i < count.size() && count[i] == 0) i++;
+    *it = (i < count.size()) ? i : 255;
+    if (i < count.size()) {
+      count[i]--;
+      len++;
     }
   }
+  return len;
+}
 
-  return ret.size() < k ? INT_MAX : 0;
+int TopKPrunedLandmarkLabeling::
+KDistanceLoop(vector<uint32_t> &ns, vector<uint32_t> &nt, size_t st, size_t ed, uint8_t k, vector<int> &ret){
+  for (size_t i = st; i < ed; i++){
+    KDistanceQuery(ns[i], nt[i], k, ret.begin() + i * k);
+  }
+  return (ed - st);
+}
+
+int TopKPrunedLandmarkLabeling::
+KDistanceParallel(vector<uint32_t> &ns, vector<uint32_t> &nt, uint8_t k, vector<int> &ret){
+  vector<thread> threads;
+  size_t st, ed = 0;
+  size_t it;
+
+  for (it = 1; it <= ns.size() % NUMTHREAD; it++) {
+    st = ed;
+    ed += ceil((float)ns.size() / NUMTHREAD);
+    threads.push_back(thread(&TopKPrunedLandmarkLabeling::KDistanceLoop, this, ref(ns), ref(nt), st, ed, k, ref(ret)));
+  }
+  for (; it <= NUMTHREAD; it++) {
+    st = ed;
+    ed += ns.size() / NUMTHREAD;
+    threads.push_back(thread(&TopKPrunedLandmarkLabeling::KDistanceLoop, this, ref(ns), ref(nt), st, ed, k, ref(ret)));
+  }
+  for (size_t t = 0; t < NUMTHREAD; t++)
+    threads[t].join();
+  vector<thread>().swap(threads);
+  return ret.size();
 }
 
 int TopKPrunedLandmarkLabeling::
@@ -216,8 +255,8 @@ SNeighbor(int v, int size, vector<int> &pos, vector<int> &dist){
   dist.clear();
 
   const vector<vector<uint32_t> > &fgraph = graph[directed];
-  std::queue<uint32_t> node_que, dist_que;
-  std::vector<bool> updated(V, false);
+  queue<uint32_t> node_que, dist_que;
+  vector<bool> updated(V, false);
   int d_last = 0;
   node_que.push(alias[v]);
   dist_que.push(0);
@@ -251,9 +290,9 @@ SPush(int v, int size, float alpha, vector<int> &pos, vector<float> &dist){
   dist.clear();
 
   const vector<vector<uint32_t> > &fgraph = graph[directed];
-  std::queue<uint32_t> node_que;
-  std::queue<float>    dist_que;
-  std::vector<bool> updated(V, false);
+  queue<uint32_t> node_que;
+  queue<float>    dist_que;
+  vector<bool> updated(V, false);
   int count = 0;
   node_que.push(alias[v]);
   dist_que.push(1.0);
@@ -400,7 +439,7 @@ CountLoops(uint32_t s, bool &status){
   int     next  = 1;
   uint8_t dist  = 0;
 
-  std::queue<uint32_t> node_que[2];
+  queue<uint32_t> node_que[2];
   vector<uint32_t>     updated;
   const vector<vector<uint32_t> > &fgraph = graph[0];
 
@@ -460,7 +499,7 @@ PrunedBfs(uint32_t s, bool rev, bool &status){
   int     next = 1;
   uint8_t dist = 0;
 
-  std::queue<uint32_t> node_que[2];
+  queue<uint32_t> node_que[2];
   vector<uint32_t>     updated;
 
   node_que[curr].push(s);
@@ -584,7 +623,7 @@ Pruning(uint32_t v,  uint8_t d, bool rev){
 
     // By using precompurted table tmp_s_count, compute the number of path with a single loop.
     for (int i = 0; i <= c && dcv[i] != INF8; i++){
-      pcount += (int)dcs[std::min(c - i, l)] * dcv[i];
+      pcount += (int)dcs[min(c - i, l)] * dcv[i];
     }
 
     if (pcount >= K) return true;

@@ -18,8 +18,14 @@ cdef class PyPLL:
 
     def k_distance_query(self, int s, int t, unsigned int K):
         cdef vector[int] result
+        result = np.empty(K, dtype=np.int32)
         self.c_pll.KDistanceQuery(s, t, K, result)
+        return result
 
+    def k_distance_parallel(self, np.ndarray[uint32_t, ndim=1] ns, np.ndarray[uint32_t, ndim=1] nt, unsigned int K):
+        cdef vector[int] result
+        result = np.empty(K * len(ns), dtype=np.int32)
+        self.c_pll.KDistanceParallel(ns, nt, K, result)
         return result
 
     def label(self, int v):

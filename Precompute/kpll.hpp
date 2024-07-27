@@ -37,10 +37,13 @@ public:
 
   ~TopKPrunedLandmarkLabeling();
 
+  int KDistanceQuery(int s, int t, uint8_t k, std::vector<int>::iterator ret_begin);
   int KDistanceQuery(int s, int t, uint8_t k, std::vector<int> &ret);
   int KDistanceQuery(int s, int t, std::vector<int> &ret){ return KDistanceQuery(s, t, K, ret); }
   int KDistanceQuery(int s, int t, uint8_t k);
   int KDistanceQuery(int s, int t){ return KDistanceQuery(s, t, K); }
+  int KDistanceLoop(std::vector<uint32_t> &ns, std::vector<uint32_t> &nt, size_t st, size_t ed, uint8_t k, std::vector<int> &ret);
+  int KDistanceParallel(std::vector<uint32_t> &ns, std::vector<uint32_t> &nt, uint8_t k, std::vector<int> &ret);
 
   float ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t K, bool directed, bool quiet);
   int Label(int v, std::vector<int> &pos, std::vector<int> &dist);
@@ -60,6 +63,7 @@ private:
   bool quiet;
   // We assume that the diameter of a given network is less than 128.
   static const uint8_t INF8;
+  static const int NUMTHREAD = 16;
 
   double loop_count_time;
   double indexing_time;
