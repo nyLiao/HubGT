@@ -248,18 +248,17 @@ class GT(nn.Module):
                     for _ in range(n_layers)]
         self.layers = nn.ModuleList(encoders)
         self.final_ln = nn.LayerNorm(hidden_dim)
+        self.attn_ego = nn.Linear(hidden_dim*2, 1)
         # self.downstream_out_proj = nn.Linear(hidden_dim*8, output_dim)
         self.downstream_out_proj = nn.Linear(hidden_dim, output_dim)
 
         self.apply(lambda module: init_params(module, n_layers=n_layers))
 
-    def forward(self, batched_data, perturb=None, get_score=False):
+    def forward(self, batched_data):
         attn_bias, x = batched_data.attn_bias, batched_data.x
         n_graph, n_node = x.size()[:2]
         graph_attn_bias = attn_bias.clone()         # [n_graph, n_node, n_node, hop]
         node_feature = self.node_encoder(x)         # [n_graph, n_node, n_hidden]
-        if perturb is not None:
-            node_feature += perturb
 
         if self.num_global_node > 0:
             vnode_feature = self.virtual_feat.weight.unsqueeze(0).repeat(n_graph, 1, 1)
@@ -267,19 +266,17 @@ class GT(nn.Module):
 
         # transfomrer encoder
         output = self.input_dropout(node_feature)
-        if get_score:
-            for i, enc_layer in enumerate(self.layers):
-                if i == self.n_layers-1:
-                    score = enc_layer(output, graph_attn_bias, get_score=True)
-                else:
-                    output = enc_layer(output, graph_attn_bias)
-            return score
         for enc_layer in self.layers:
             output = enc_layer(output, graph_attn_bias)
         output = self.final_ln(output)              # [n_graph, n_node, n_hidden]
 
         # output part
-        # output = output[:, 0, :].reshape(-1, self.hidden_dim*8)
-        # output = self.downstream_out_proj(output)
-        output = self.downstream_out_proj(output[:, 0, :])
-        return F.log_softmax(output, dim=1)
+        target = output[:, 0, :].unsqueeze(1).repeat(1, n_node-1, 1)
+        out_ego, out_neighbor = torch.split(output, [1, n_node-1], dim=1)
+        alpha_ego = self.attn_ego(torch.cat([target, out_neighbor], dim=2))
+        alpha_ego = torch.softmax(alpha_ego, dim=1)
+        out_neighbor = torch.sum(out_neighbor * alpha_ego, dim=1, keepdim=True)
+        output = (out_ego + out_neighbor).squeeze(1)
+        output = self.downstream_out_proj(output)
+        # output = self.downstream_out_proj(output[:, 0, :])
+        return output

@@ -59,14 +59,15 @@ ReAllocDistArray(size_t i, size_t nmemb){
 }
 
 float TopKPrunedLandmarkLabeling::
-ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K, bool directed){
+ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K, bool directed, bool quiet){
   Free();
 
   this->V = 0;
   this->K = K;
   this->directed = directed;
+  this->quiet = quiet;
   V = std::max(*max_element(ns.begin(), ns.end()), *max_element(nt.begin(), nt.end())) + 1;
-  // cout << "Nodes: " << V << ", Edges: " << ns.size() << ", K: " << K << ", Directed: " << directed << endl;
+  if (!quiet) cout << "Nodes: " << V << ", Edges: " << ns.size() << ", K: " << K << ", Directed: " << directed << endl;
 
   for (int dir = 0; dir < 1 + directed; dir++){
     graph[dir].resize(V);
@@ -116,10 +117,14 @@ ConstructIndex(const vector<uint32_t> &ns, const vector<uint32_t> &nt, size_t K,
     if (directed){
       PrunedBfs(v, true, status);
     }
+
+    if (!quiet && v % (V / 10) == 0){
+      cout << indexing_time+GetCurrentTimeSec() << " (" << (100 * v / V) << "%) ";
+    }
   }
   indexing_time += GetCurrentTimeSec();
 
-  // cout << "Loop count time: " << loop_count_time << ", Indexing time: " << indexing_time << endl;
+  if (!quiet) cout << endl << "Loop count time: " << loop_count_time << ", Indexing time: " << indexing_time << endl;
   return loop_count_time + indexing_time;
 }
 

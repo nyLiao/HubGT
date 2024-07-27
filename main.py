@@ -17,6 +17,7 @@ def learn(args, model, device, loader, optimizer):
     model.train()
     loss_epoch = Accumulator()
     stopwatch = Stopwatch()
+    criterion = F.binary_cross_entropy_with_logits if (args.num_classes == 1 or args.multi) else F.cross_entropy
 
     for batch in loader:
         batch = batch.to(device)
@@ -24,7 +25,7 @@ def learn(args, model, device, loader, optimizer):
             optimizer.zero_grad()
             output = model(batch)
             label  = batch.y.view(-1)
-            loss = F.nll_loss(output, label, ignore_index=-1)
+            loss = criterion(output, label, ignore_index=-1)
             loss.backward()
             optimizer.step()
 
@@ -46,7 +47,7 @@ def eval(args, model, device, loader, evaluator):
             output = model(batch).view(-1, args.ns, args.num_classes)
             label  = batch.y.view(-1, args.ns)[:, 0]
 
-        # Average output matrix on subgraph dim based on majority predicted class
+        # Average output logits on subgraph dim based on majority predicted class
         pred = output.argmax(dim=2)  # [batch, ns]
         mask = torch.mode(pred, dim=1).values
         mask = torch.where(pred == mask[:, None], 1, 0)

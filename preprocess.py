@@ -42,13 +42,14 @@ def process_data(args, res_logger=utils.ResLogger()):
 
     deg = pyg_utils.degree(data.edge_index[0], num_nodes, dtype=int)
     id_map = torch.argsort(deg, descending=False)
+    deg_max = deg[id_map[-1]]
     id_map_inv = torch.empty_like(id_map)
     id_map_inv[id_map] = torch.arange(num_nodes)
 
     py_pll = PyPLL()
     edge_index = data.edge_index.numpy().astype(np.uint32)
-    time_pre = py_pll.construct_index(edge_index, args.kindex, not undirected)
-    del edge_index, data.edge_index
+    time_pre = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
+    del edge_index, data.edge_index, deg
     data.edge_index = None
 
     stopwatch_sample, stopwatch_spd = utils.Stopwatch(), utils.Stopwatch()
@@ -84,7 +85,7 @@ def process_data(args, res_logger=utils.ResLogger()):
         s2 = min(s2, s2_actual)
 
         # Sample neighbors
-        ids_i = np.full((args.ns, s_total), ego, dtype=np.int16)
+        ids_i = np.full((args.ns, s_total), ego, dtype=np.int64)
         ids_i[:, 1:s0+1] = choice_cap(nodes0, s0, args.ns, val0)
         if s1 > 0:
             ids_i[:, s0+1:s0+s1+1] = choice_cap(nodes1, s1, args.ns, val1)
@@ -112,7 +113,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     # SPD graph value
     spd.sum_duplicates()
     rows, cols, _ = sp.find(spd)
-    spd_bias = torch.zeros((len(rows), args.kbias), dtype=torch.int16)
+    spd_bias = torch.zeros((len(rows), args.kbias), dtype=int)
     # for i, (u, v) in enumerate(tqdm(zip(rows, cols), total=len(rows))):
     for i, (u, v) in enumerate(zip(rows, cols)):
         stopwatch_spd.start()
@@ -158,7 +159,7 @@ def process_data(args, res_logger=utils.ResLogger()):
         ))
         s += f'{split}: {mask.sum().item()}, '
     logger.log(logging.LTRN, s)
-    logger.log(logging.LTRN, f'SPD size: {spd.nnz}, feat size: {x.size(1)}')
+    logger.log(logging.LTRN, f'SPD size: {spd.nnz}, feat size: {x.size(1)}, max deg: {deg_max}')
     logger.log(logging.LTRN, f'Indexing time: {time_pre:.2f}, Neighbor time: {stopwatch_sample}, SPD time: {stopwatch_spd}')
 
     res_logger.concat([

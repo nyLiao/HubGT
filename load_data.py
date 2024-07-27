@@ -257,6 +257,8 @@ class SingleGraphLoader(object):
         # Remaining resolvers
         if not args.multi and data.y.dim() > 1 and data.y.size(1) == 1:
             data.y = data.y.flatten()
+        if not args.multi and self.num_classes == 2:
+            args.num_classes = self.num_classes = 1
 
         self.logger.info(f"[dataset]: {dataset} (features={self.num_features}, classes={self.num_classes})")
         self.logger.info(f"[data]: {data}")

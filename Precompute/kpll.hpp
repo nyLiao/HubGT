@@ -42,7 +42,7 @@ public:
   int KDistanceQuery(int s, int t, uint8_t k);
   int KDistanceQuery(int s, int t){ return KDistanceQuery(s, t, K); }
 
-  float ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t K, bool directed);
+  float ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t K, bool directed, bool quiet);
   int Label(int v, std::vector<int> &pos, std::vector<int> &dist);
   int SNeighbor(int v, int size, std::vector<int> &pos, std::vector<int> &dist);
   int SPush(int v, int size, float alpha, std::vector<int> &pos, std::vector<float> &dist);
@@ -57,6 +57,7 @@ private:
   size_t V;
   uint8_t K;
   bool directed;
+  bool quiet;
   // We assume that the diameter of a given network is less than 128.
   static const uint8_t INF8;
 
