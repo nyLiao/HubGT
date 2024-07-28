@@ -85,11 +85,11 @@ class StructuralLinear(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, hidden_size, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node):
+    def __init__(self, hidden_size, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node, dp_bias):
         super(MultiHeadAttention, self).__init__()
 
         self.num_heads = num_heads
-
+        self.dp_bias = dp_bias
         self.att_size = att_size = hidden_size // num_heads
         self.scale = att_size ** -0.5
 
@@ -99,7 +99,6 @@ class MultiHeadAttention(nn.Module):
         self.bias_enc = StructuralEmbedding(num_heads, num_global_node)
         # self.bias_enc = StructuralLinear(num_heads, attn_bias_dim, num_global_node)
         self.att_dropout = nn.Dropout(attention_dropout_rate)
-
         self.output_layer = nn.Linear(num_heads * att_size, hidden_size)
 
     def forward(self, q, k, v, attn_bias=None, get_score=False):
@@ -122,8 +121,12 @@ class MultiHeadAttention(nn.Module):
         q = q * self.scale
         x = torch.matmul(q, k)  # [b, h, q_len, k_len]
         if attn_bias is not None:
-            # TODO: dropout
             attn_bias = self.bias_enc(attn_bias)
+            if self.dp_bias > 0:
+                mask = torch.rand_like(attn_bias) < self.dp_bias
+                mask &= ~torch.eye(attn_bias.size(2), dtype=torch.bool, device=mask.device).unsqueeze(0).unsqueeze(0)
+                mask = torch.where(mask, -torch.inf, 0.0)
+                attn_bias += mask
             x = x + attn_bias
 
         x = torch.softmax(x, dim=3)
@@ -145,12 +148,12 @@ class MultiHeadAttention(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, hidden_size, ffn_size, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node):
+    def __init__(self, hidden_size, ffn_size, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node, dp_bias):
         super(EncoderLayer, self).__init__()
 
         self.self_attention_norm = nn.LayerNorm(hidden_size)
         self.self_attention = MultiHeadAttention(
-            hidden_size, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node)
+            hidden_size, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node, dp_bias)
         self.self_attention_dropout = nn.Dropout(dropout_rate)
 
         self.ffn_norm = nn.LayerNorm(hidden_size)
@@ -174,9 +177,9 @@ class EncoderLayer(nn.Module):
         return x
 
 
-class MyEncoderLayer(nn.Module):
+class KernelEncoderLayer(nn.Module):
     def __init__(self, hidden_size, ffn_size, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim):
-        super(MyEncoderLayer, self).__init__()
+        super(KernelEncoderLayer, self).__init__()
 
         self.num_heads = num_heads
         self.att_size = att_size = hidden_size // num_heads
@@ -228,11 +231,13 @@ class GT(nn.Module):
         hidden_dim,
         output_dim,
         attn_bias_dim,
-        dropout_rate,
-        intput_dropout_rate,
+        dp_input,
+        dp_bias,
+        dp_ffn,
+        dp_attn,
         ffn_dim,
         num_global_node,
-        attention_dropout_rate,
+        aggr_output,
     ):
         super().__init__()
 
@@ -240,17 +245,18 @@ class GT(nn.Module):
         self.n_layers = n_layers
         self.hidden_dim = hidden_dim
         self.num_global_node = num_global_node
+        self.aggr_output = aggr_output
         if self.num_global_node > 0:
             self.virtual_feat = nn.Embedding(self.num_global_node, hidden_dim)
 
         self.node_encoder = nn.Linear(input_dim, hidden_dim)
-        self.input_dropout = nn.Dropout(intput_dropout_rate)
-        encoders = [EncoderLayer(hidden_dim, ffn_dim, dropout_rate, attention_dropout_rate, num_heads, attn_bias_dim, num_global_node)
+        self.input_dropout = nn.Dropout(dp_input)
+        encoders = [EncoderLayer(hidden_dim, ffn_dim, dp_ffn, dp_attn, num_heads, attn_bias_dim, num_global_node, dp_bias)
                     for _ in range(n_layers)]
         self.layers = nn.ModuleList(encoders)
         self.final_ln = nn.LayerNorm(hidden_dim)
-        self.attn_ego = nn.Linear(hidden_dim*2, 1)
-        # self.downstream_out_proj = nn.Linear(hidden_dim*8, output_dim)
+        if aggr_output:
+            self.attn_ego = nn.Linear(hidden_dim*2, 1)
         self.downstream_out_proj = nn.Linear(hidden_dim, output_dim)
 
         self.apply(lambda module: init_params(module, n_layers=n_layers))
@@ -272,12 +278,14 @@ class GT(nn.Module):
         output = self.final_ln(output)              # [n_graph, n_node, n_hidden]
 
         # output part
-        target = output[:, 0, :].unsqueeze(1).repeat(1, n_node-1, 1)
-        out_ego, out_neighbor = torch.split(output, [1, n_node-1], dim=1)
-        alpha_ego = self.attn_ego(torch.cat([target, out_neighbor], dim=2))
-        alpha_ego = torch.softmax(alpha_ego, dim=1)
-        out_neighbor = torch.sum(out_neighbor * alpha_ego, dim=1, keepdim=True)
-        output = (out_ego + out_neighbor).squeeze(1)
-        output = self.downstream_out_proj(output)
-        # output = self.downstream_out_proj(output[:, 0, :])
+        if self.aggr_output:
+            target = output[:, 0, :].unsqueeze(1).repeat(1, n_node-1, 1)
+            out_ego, out_neighbor = torch.split(output, [1, n_node-1], dim=1)
+            alpha_ego = self.attn_ego(torch.cat([target, out_neighbor], dim=2))
+            alpha_ego = torch.softmax(alpha_ego, dim=1)
+            out_neighbor = torch.sum(out_neighbor * alpha_ego, dim=1, keepdim=True)
+            output = (out_ego + out_neighbor).squeeze(1)
+            output = self.downstream_out_proj(output)
+        else:
+            output = self.downstream_out_proj(output[:, 0, :])
         return output

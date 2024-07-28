@@ -87,11 +87,13 @@ def main(args):
         hidden_dim=args.hidden_dim,
         output_dim=args.num_classes,
         attn_bias_dim=args.kbias,
-        attention_dropout_rate=args.attention_dropout_rate,
-        dropout_rate=args.dropout_rate,
-        intput_dropout_rate=args.intput_dropout_rate,
+        dp_attn=args.dp_attn,
+        dp_ffn=args.dp_ffn,
+        dp_input=args.dp_input,
+        dp_bias=args.dp_bias,
         ffn_dim=args.ffn_dim,
-        num_global_node=args.num_global_node
+        num_global_node=args.num_global_node,
+        aggr_output=args.aggr_output,
     )
     logger.log(logging.LTRN, str(model))
     model.to(args.device)
