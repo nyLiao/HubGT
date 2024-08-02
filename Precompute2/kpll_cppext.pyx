@@ -12,6 +12,7 @@ cdef class PyPLL:
     def __cinit__(self):
         self.c_pll = PrunedLandmarkLabeling()
 
-    def construct_index(self, np.ndarray[int, ndim=2] edge_index, unsigned int K, bool directed, bool quiet):
+    def construct_index(self, np.ndarray[uint32_t, ndim=2] edge_index, unsigned int K, bool directed, bool quiet):
         ns, nt = edge_index
+        self.c_pll.SetArgs(quiet)
         return self.c_pll.ConstructIndex(ns, nt)
