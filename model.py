@@ -279,6 +279,7 @@ class GT(nn.Module):
 
         # output part
         if self.aggr_output:
+            n_node = output.size(1)
             target = output[:, 0, :].unsqueeze(1).repeat(1, n_node-1, 1)
             out_ego, out_neighbor = torch.split(output, [1, n_node-1], dim=1)
             alpha_ego = self.attn_ego(torch.cat([target, out_neighbor], dim=2))

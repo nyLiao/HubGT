@@ -31,11 +31,13 @@ class TopKPrunedLandmarkLabeling{
 
 public:
   TopKPrunedLandmarkLabeling() :
-    V(0), K(0), directed(0), loop_count_time(0), indexing_time(0){
+    V(0), K(0), directed(0){
     index[0] = index[1] = NULL;
   }
 
-  ~TopKPrunedLandmarkLabeling();
+  ~TopKPrunedLandmarkLabeling(){
+    Free();
+  };
 
   int KDistanceQuery(int s, int t, uint8_t k, std::vector<int>::iterator ret_begin);
   int KDistanceQuery(int s, int t, uint8_t k, std::vector<int> &ret);
@@ -46,12 +48,15 @@ public:
   int KDistanceParallel(std::vector<uint32_t> &ns, std::vector<uint32_t> &nt, uint8_t k, std::vector<int> &ret);
 
   float ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t K, bool directed, bool quiet);
+  bool   StoreIndex(std::ofstream &ofs);
+  bool   StoreIndex(const char *file);
+  bool   LoadIndex(std::ifstream &ifs);
+  bool   LoadIndex(const char *file);
+
   int Label(int v, std::vector<int> &pos, std::vector<int> &dist);
   int SNeighbor(int v, int size, std::vector<int> &pos, std::vector<int> &dist);
   int SPush(int v, int size, float alpha, std::vector<int> &pos, std::vector<float> &dist);
 
-  double IndexingTime()  const { return indexing_time; }
-  double LoopCountTime() const { return loop_count_time; }
   size_t NumOfVertex ()      { return V; }
   size_t IndexSize();
   double AverageLabelSize();
@@ -64,9 +69,6 @@ private:
   // We assume that the diameter of a given network is less than 128.
   static const uint8_t INF8;
   static const int NUMTHREAD = 16;
-
-  double loop_count_time;
-  double indexing_time;
 
   std::vector<uint32_t> alias;
   std::vector<uint32_t> alias_inv;

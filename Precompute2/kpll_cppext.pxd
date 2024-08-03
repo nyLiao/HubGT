@@ -10,3 +10,9 @@ cdef extern from "ppll.h":
 
         void SetArgs(bool)
         float ConstructIndex(vector[uint32_t] &, vector[uint32_t] &)
+        bool LoadIndex(char *)
+        bool StoreIndex(char *)
+
+        int QueryDistanceParallel(vector[uint32_t] &, vector[uint32_t] &, vector[int] &)
+        int Label(int, vector[int] &, vector[int] &)
+        int SNeighbor(int, int, vector[int] &, vector[int] &)

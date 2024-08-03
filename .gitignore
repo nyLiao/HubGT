@@ -8,6 +8,7 @@ exps/
 data
 data/
 dataset/
+cache/
 figs/
 
 # User specific

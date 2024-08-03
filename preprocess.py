@@ -14,7 +14,7 @@ import torch_geometric.utils as pyg_utils
 from load_data import SingleGraphLoader
 import utils
 from utils.collator import collate, INF8
-from Precompute import PyPLL
+from Precompute2 import PyPLL
 
 
 def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
@@ -58,6 +58,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     num_nodes = data.num_nodes
     x, y = data.x, data.y
     undirected = pyg_utils.is_undirected(data.edge_index)
+    edge_index = data.edge_index.numpy().astype(np.uint32)
     if not undirected:
         logger.warning(f'Warning: Directed graph.')
 
@@ -69,8 +70,8 @@ def process_data(args, res_logger=utils.ResLogger()):
 
     # ===== Build label
     py_pll = PyPLL()
-    edge_index = data.edge_index.numpy().astype(np.uint32)
-    time_pre = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
+    time_index = py_pll.get_index(
+        edge_index, str(args.logpath.parent), args.quiet, args.index)
     del edge_index, data.edge_index, deg
     data.edge_index = None
 
@@ -95,6 +96,7 @@ def process_data(args, res_logger=utils.ResLogger()):
             nodes1, val1 = zip(*n1_lst[int(ego)])
             nodes1 = list(nodes1)
             val1 = np.array(val1) ** args.r0
+            s1_actual = len(nodes1)
         s1 = min(args.s1, s1_actual)
 
         s2 = s_total - s0 - s1 - 1
@@ -127,7 +129,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     rows, cols = rows.astype(np.uint32), cols.astype(np.uint32)
     spd.data = np.arange(len(rows), dtype=int)
     with stopwatch_spd:
-        spd_bias = py_pll.k_distance_parallel(rows, cols, args.kbias)
+        spd_bias = py_pll.k_distance_parallel(rows, cols)
     spd_bias = torch.tensor(spd_bias, dtype=int).view(-1, args.kbias)
 
     # ===== Extend features
@@ -143,9 +145,8 @@ def process_data(args, res_logger=utils.ResLogger()):
     # ===== Data loader
     graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd.tocsr(), spd_bias=spd_bias)
     graph.contiguous('x', 'y', 'spd_bias')
-    # os.makedirs('./dataset/' + args.data, exist_ok=True)
-    # torch.save(graph, './dataset/'+args.data+'/graph.pt')
-    # torch.save(ids, './dataset/'+args.data+'/ids.pt')
+    # torch.save(graph, './cache/'+args.data+'/graph.pt')
+    # torch.save(ids, './cache/'+args.data+'/ids.pt')
 
     s = ''
     loader = {}
@@ -166,10 +167,11 @@ def process_data(args, res_logger=utils.ResLogger()):
         s += f'{split}: {mask.sum().item()}, '
     logger.log(logging.LTRN, s)
     logger.log(logging.LTRN, f'SPD size: {spd.nnz}, feat size: {x.size(1)}, max deg: {deg_max}')
-    logger.log(logging.LTRN, f'Indexing time: {time_pre:.2f}, Neighbor time: {stopwatch_sample}, SPD time: {stopwatch_spd}')
+    logger.log(logging.LTRN, f'Indexing time: {time_index:.2f}, Neighbor time: {stopwatch_sample}, SPD time: {stopwatch_spd}')
 
     res_logger.concat([
-        ('time_pre', time_pre + stopwatch_sample.data + stopwatch_spd.data),
+        ('time_index', time_index),
+        ('time_pre', time_index + stopwatch_sample.data + stopwatch_spd.data),
         ('mem_ram_pre', utils.MemoryRAM()(unit='G')),
         ('mem_cuda_pre', utils.MemoryCUDA()(unit='G')),
     ])
@@ -179,6 +181,9 @@ def process_data(args, res_logger=utils.ResLogger()):
 if __name__ == '__main__':
     logging.LTRN = 15
     args = utils.setup_args(utils.setup_argparse())
+    args.logpath, args.logid = utils.setup_logpath(
+        folder_args=(args.data, str(args.seed[0])),
+        quiet=args.quiet)
     np.random.seed(args.seed[0])
     logger = utils.setup_logger(level_file=30, quiet=args.quiet)
     process_data(args)

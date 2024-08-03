@@ -17,6 +17,3 @@ cdef extern from "kpll.hpp":
         int Label(int, vector[int] &, vector[int] &)
         int SNeighbor(int, int, vector[int] &, vector[int] &)
         int SPush(int, int, float, vector[int] &, vector[float] &)
-
-        double IndexingTime()
-        double LoopCountTime()

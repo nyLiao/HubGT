@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <xmmintrin.h>
 #include <sys/time.h>
+#include <thread>
 #include <climits>
 #include <iostream>
 #include <sstream>
@@ -16,6 +17,7 @@
 #include <queue>
 #include <set>
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <utility>
 
@@ -23,17 +25,22 @@
 class PrunedLandmarkLabeling {
 public:
   float ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt);
+  int Label(const int v, std::vector<int> &pos, std::vector<int> &dist);
+  int SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist);
 
-  inline int QueryDistance(uint32_t v, uint32_t w);
+  inline int QueryDistance(const uint32_t v, const uint32_t w);
+  int QueryDistanceLoop(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t st, size_t ed, std::vector<int> &ret);
+  int QueryDistanceParallel(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, std::vector<int> &ret);
 
   bool LoadIndex(std::ifstream &ifs);
   bool LoadIndex(const char *filename);
   bool StoreIndex(std::ofstream &ofs);
   bool StoreIndex(const char *filename);
 
+  void SetArgs(const bool quiet_) { quiet = quiet_; }
   int GetNumVertices() { return V; }
-  void SetArgs(bool quiet_) { quiet = quiet_; }
-  void PrintStatistics();
+  int GetBP() { return kNumBitParallelRoots; }
+  double AverageLabelSize();
 
   PrunedLandmarkLabeling()
       : V(0), index_(NULL) {}
@@ -42,22 +49,24 @@ public:
   }
 
 private:
-  static const int kNumBitParallelRoots = 96;
   static const uint8_t INF8;  // For unreachable pairs
+  static const int kNumBitParallelRoots = 64;
   static const int NUMTHREAD = 16;
 
+  // 4 * 33 * BP + 40 * |L|
   struct index_t {
-    uint8_t bpspt_d[kNumBitParallelRoots];
+    uint8_t  bpspt_d[kNumBitParallelRoots];     // Bit-parallel Shortest Path distances
     uint64_t bpspt_s[kNumBitParallelRoots][2];  // [0]: S^{-1}, [1]: S^{0}
-    uint32_t *spt_v;
-    uint8_t *spt_d;
-  } __attribute__((aligned(64)));  // Aligned for cache lines
+    uint32_t *spt_v;                // PLL Shortest Path nodes
+    uint8_t  *spt_d;                // PLL Shortest Path distances
+  } __attribute__((aligned(64)));   // Aligned for cache lines
 
   size_t V;
   bool quiet = false;
   index_t *index_;
   std::vector<std::vector<uint32_t> > adj;
   std::vector<uint32_t> alias, alias_inv;
+  std::vector<uint32_t> bp_root;
 
   inline void Init();
   void Free();
@@ -81,7 +90,7 @@ ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt)
   Free();
   this->V = 0;
   V = std::max(*std::max_element(ns.begin(), ns.end()), *std::max_element(nt.begin(), nt.end())) + 1;
-  if (!quiet) std::cout << "Nodes: " << V << ", Edges: " << E << std::endl;
+  if (!quiet) std::cout << "Building index -- Nodes: " << V << ", Edges: " << E << std::endl;
 
   // Order vertices by decreasing order of degree
   adj.resize(V);
@@ -108,6 +117,7 @@ ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt)
 
   // Bit-parallel labeling
   Init();
+  bp_root.resize(kNumBitParallelRoots);
   time_neighbor = -GetCurrentTimeSec();
   std::vector<bool> usd(V, false);  // Used as root? (in new label)
   {
@@ -125,6 +135,7 @@ ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt)
         continue;
       }
       usd[r] = true;
+      bp_root[i_bpspt] = r;
 
       fill(tmp_d.begin(), tmp_d.end(), INF8);
       fill(tmp_s.begin(), tmp_s.end(), std::make_pair(0, 0));
@@ -135,7 +146,7 @@ ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt)
       que_t1 = que_h;
 
       int nns = 0;
-      // sort(adj[r].begin(), adj[r].end());
+      std::sort(adj[r].begin(), adj[r].end(), std::less<uint32_t>());
       for (size_t i = 0; i < adj[r].size(); ++i) {
         uint32_t v = adj[r][i];
         if (!usd[v]) {
@@ -293,10 +304,6 @@ ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt)
       size_t k = tmp_idx[v].first.size();
       index_[v].spt_v = (uint32_t*)memalign(64, k * sizeof(uint32_t));
       index_[v].spt_d = (uint8_t *)memalign(64, k * sizeof(uint8_t ));
-      if (!index_[v].spt_v || !index_[v].spt_d) {
-        Free();
-        return -1.0;
-      }
       for (size_t i = 0; i < k; ++i) index_[v].spt_v[i] = tmp_idx[v].first[i];
       for (size_t i = 0; i < k; ++i) index_[v].spt_d[i] = tmp_idx[v].second[i];
       tmp_idx[v].first.clear();
@@ -305,13 +312,92 @@ ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt)
   }
   time_search += GetCurrentTimeSec();
 
-  if (!quiet) std::cout << std::endl << "Neighbor time: " << time_neighbor << ", Search time: " << time_search << std::endl;
+  if (!quiet) std::cout << std::endl << "Neighbor time: " << time_neighbor << ", Search time: " << time_search
+    << ", Avg Label Size: " << AverageLabelSize() << std::endl;
   return time_neighbor + time_search;
 }
 
 // ====================
 int PrunedLandmarkLabeling::
-QueryDistance(uint32_t v, uint32_t w) {
+Label(const int v, std::vector<int> &pos, std::vector<int> &dist){
+  pos.clear();
+  dist.clear();
+  const index_t &idx_v = index_[alias[v]];
+  bool flag;
+
+  for (int i = 0; i < kNumBitParallelRoots; ++i){
+    if (idx_v.bpspt_d[i] > 16 || idx_v.bpspt_d[i] == 0) continue;
+    const index_t &idx_w = index_[bp_root[i]];
+    flag = true;
+
+    // std::cout << "  " << v << " " << alias_inv[bp_root[i]] << " " << int(idx_v.bpspt_d[i]) ;
+    for (int j = 0; j < i; ++j) {
+      uint8_t td = idx_v.bpspt_d[j] + idx_w.bpspt_d[j];
+      if (td - 2 <= idx_v.bpspt_d[i]) {
+        td +=
+            (idx_v.bpspt_s[j][0] & idx_w.bpspt_s[j][0]) ? -2 :
+            ((idx_v.bpspt_s[j][0] & idx_w.bpspt_s[j][1]) | (idx_v.bpspt_s[j][1] & idx_w.bpspt_s[j][0]))
+            ? -1 : 0;
+
+        // std::cout << ", " << alias_inv[bp_root[j]] << " " << int(td);
+        if (td <= idx_v.bpspt_d[i]){
+          flag = false;
+          break;
+        }
+      }
+    }
+    // std::cout << std::endl;
+
+    if (flag){
+      pos.push_back(alias_inv[bp_root[i]]);
+      dist.push_back(idx_v.bpspt_d[i]);
+    }
+  }
+
+  for (int i = 0; idx_v.spt_v[i] != V; ++i){
+    if (idx_v.spt_d[i] == 0) continue;
+    pos.push_back(alias_inv[idx_v.spt_v[i]]);
+    dist.push_back(idx_v.spt_d[i]);
+  }
+  return pos.size();
+}
+
+int PrunedLandmarkLabeling::
+SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist){
+  pos.clear();
+  dist.clear();
+
+  std::queue<uint32_t> node_que, dist_que;
+  std::vector<bool> updated(V, false);
+  int d_last = 0;
+  node_que.push(alias[v]);
+  dist_que.push(0);
+  updated[alias[v]] = true;
+
+  while (!node_que.empty()){
+    uint32_t u = node_que.front();
+    uint8_t  d = dist_que.front();
+    node_que.pop();
+    dist_que.pop();
+    // Exit condition for every hop
+    if (d > d_last && pos.size() >= size_t(size)) break;
+    d_last = d;
+
+    for (size_t i = 0; i < adj[u].size(); i++){
+      if (updated[adj[u][i]]) continue;
+      node_que.push(adj[u][i]);
+      dist_que.push(d + 1);
+      pos.push_back(alias_inv[adj[u][i]]);
+      dist.push_back(d + 1);
+      updated[adj[u][i]] = true;
+    }
+  }
+
+  return pos.size();
+}
+
+int PrunedLandmarkLabeling::
+QueryDistance(const uint32_t v, const uint32_t w) {
   if (v >= V || w >= V) return v == w ? 0 : INT_MAX;
 
   const index_t &idx_v = index_[alias[v]];
@@ -324,7 +410,7 @@ QueryDistance(uint32_t v, uint32_t w) {
   _mm_prefetch(&idx_w.spt_d[0], _MM_HINT_T0);
 
   for (int i = 0; i < kNumBitParallelRoots; ++i) {
-    int td = idx_v.bpspt_d[i] + idx_w.bpspt_d[i];
+    uint8_t td = idx_v.bpspt_d[i] + idx_w.bpspt_d[i];
     if (td - 2 <= d) {
       td +=
           (idx_v.bpspt_s[i][0] & idx_w.bpspt_s[i][0]) ? -2 :
@@ -348,23 +434,52 @@ QueryDistance(uint32_t v, uint32_t w) {
     }
   }
 
-  if (d >= INF8 - 2) d = INF8;
+  if (d >= INF8 - 2) d = 255;
   return d;
+}
+
+int PrunedLandmarkLabeling::
+QueryDistanceLoop(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t st, size_t ed, std::vector<int> &ret){
+  for (size_t i = st; i < ed; i++){
+    auto it = ret.begin() + i;
+    *it = QueryDistance(ns[i], nt[i]);
+  }
+  return (ed - st);
+}
+
+int PrunedLandmarkLabeling::
+QueryDistanceParallel(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, std::vector<int> &ret){
+  std::vector<std::thread> threads;
+  size_t st, ed = 0;
+  size_t it;
+
+  for (it = 1; it <= ns.size() % NUMTHREAD; it++) {
+    st = ed;
+    ed += std::ceil((float)ns.size() / NUMTHREAD);
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::QueryDistanceLoop, this, ref(ns), ref(nt), st, ed, ref(ret)));
+  }
+  for (; it <= NUMTHREAD; it++) {
+    st = ed;
+    ed += ns.size() / NUMTHREAD;
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::QueryDistanceLoop, this, ref(ns), ref(nt), st, ed, ref(ret)));
+  }
+  for (size_t t = 0; t < NUMTHREAD; t++)
+    threads[t].join();
+  std::vector<std::thread>().swap(threads);
+  return ret.size();
 }
 
 
 // ====================
 template<typename T> inline
-void write_vector(std::ofstream& ofs, const std::vector<T>& data)
-{
+void write_vector(std::ofstream& ofs, const std::vector<T>& data){
 	const size_t count = data.size();
 	ofs.write(reinterpret_cast<const char*>(&count), sizeof(size_t));
 	ofs.write(reinterpret_cast<const char*>(&data[0]), count * sizeof(T));
 }
 
 template<typename T> inline
-void read_vector(std::ifstream& ifs, std::vector<T>& data)
-{
+void read_vector(std::ifstream& ifs, std::vector<T>& data){
 	size_t count;
 	ifs.read(reinterpret_cast<char*>(&count), sizeof(size_t));
 	data.resize(count);
@@ -373,6 +488,7 @@ void read_vector(std::ifstream& ifs, std::vector<T>& data)
 
 bool PrunedLandmarkLabeling::
 StoreIndex(const char *filename) {
+  if (!quiet) std::cout << "Saving index -- " << filename << std::endl;
   std::ofstream ofs(filename);
   return ofs && StoreIndex(ofs);
 }
@@ -383,6 +499,7 @@ StoreIndex(std::ofstream &ofs) {
   WRITE_BINARY(V);
   write_vector(ofs, alias);
   write_vector(ofs, alias_inv);
+  write_vector(ofs, bp_root);
   for (size_t v = 0; v < V; ++v){
     write_vector(ofs, adj[v]);
   }
@@ -409,6 +526,7 @@ StoreIndex(std::ofstream &ofs) {
 
 bool PrunedLandmarkLabeling::
 LoadIndex(const char *filename) {
+  if (!quiet) std::cout << "Loading index -- " << filename << std::endl;
   std::ifstream ifs(filename);
   return ifs && LoadIndex(ifs);
 }
@@ -418,13 +536,15 @@ LoadIndex(std::ifstream &ifs) {
 #define READ_BINARY(value) (ifs.read((char*)&(value), sizeof(value)))
   Free();
   READ_BINARY(V);
-  Init();
   read_vector(ifs, alias);
   read_vector(ifs, alias_inv);
+  read_vector(ifs, bp_root);
+  adj.resize(V);
   for (size_t v = 0; v < V; ++v){
     read_vector(ifs, adj[v]);
   }
 
+  Init();
   for (size_t v = 0; v < V; ++v) {
     index_t &idx = index_[v];
     for (int i = 0; i < kNumBitParallelRoots; ++i) {
@@ -476,17 +596,15 @@ Free() {
   V = 0;
 }
 
-void PrunedLandmarkLabeling::
-PrintStatistics() {
+double PrunedLandmarkLabeling::
+AverageLabelSize() {
   double s = 0.0;
   for (size_t v = 0; v < V; ++v) {
     for (int i = 0; index_[v].spt_v[i] != uint32_t(V); ++i) {
       ++s;
     }
   }
-  s /= V;
-  std::cout << "bit-parallel label size: "   << kNumBitParallelRoots << std::endl;
-  std::cout << "average normal label size: " << s << std::endl;
+  return s / V;
 }
 
 #endif  // PRUNED_LANDMARK_LABELING_H_

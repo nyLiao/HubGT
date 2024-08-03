@@ -50,6 +50,7 @@ def setup_argparse():
     parser.add_argument('-z', '--suffix', type=str, default=None, help='Save name suffix.')
     parser.add_argument('--loglevel', type=int, default=10, help='10:progress, 15:train, 20:info, 25:result')
     parser.add_argument('-quiet', action='store_true', help='Dry run without saving logs.')
+    parser.add_argument('-index', action='store_true', help='Force saving index.')
     # Model configuration
     parser.add_argument('--n_layers', type=int, default=4)
     parser.add_argument('--num_heads', type=int, default=8)
@@ -68,7 +69,7 @@ def setup_argparse():
     parser.add_argument('--end_lr', type=float, default=1e-9)
     # Data configuration
     parser.add_argument('-d', '--data', type=str, default='citeseer', help='Dataset name')
-    parser.add_argument('-b', '--batch', type=int, default=256)
+    parser.add_argument('-b', '--batch', type=int, default=1024)
     parser.add_argument('--data_split', type=str, default='60/20/20', help='Index or percentage of dataset split')
     parser.add_argument('--multi', action='store_true', help='True for multi-label classification')
     parser.add_argument('--num_workers', type=int, default=16, help='number of loader workers')
@@ -76,7 +77,7 @@ def setup_argparse():
     # Precompute configuration
     parser.add_argument('--kindex', type=int, default=8, help='top-K PLL indexing')
     parser.add_argument('--kbias', type=int, default=1, help='top-K SPD for bias')
-    parser.add_argument('--kfeat', type=int, default=8, help='top-K SPD for feature')
+    parser.add_argument('--kfeat', type=int, default=0, help='top-K SPD for feature')
     parser.add_argument('-ns', type=int, default=8, help='num of subgraphs')
     parser.add_argument('-ss', type=int, default=32, help='total num of nodes in each subgraph')
     parser.add_argument('--num_global_node', type=int, default=0)

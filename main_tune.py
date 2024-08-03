@@ -21,14 +21,14 @@ def objective(trial, args, logger, res_logger):
     res_logger = deepcopy(res_logger)
     args = deepcopy(args)
     # args.perturb_std = trial.suggest_float('perturb_std', 0.0, 0.05, step=0.001)
-    args.aggr_output = trial.suggest_categorical('aggr_output', [True, False])
-    args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
+    args.aggr_output = trial.suggest_int('aggr_output', 0, 1)
+    # args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
     args.ns = trial.suggest_int('ns', 2, 10, step=2)
-    args.num_global_node = trial.suggest_int('num_global_node', 0, 4)
-    args.s0 = trial.suggest_int('s0', 0, 22, step=2)
+    args.num_global_node = trial.suggest_int('num_global_node', 0, 3)
+    args.s0 = trial.suggest_int('s0', 0, 20, step=2)
     args.s1 = trial.suggest_int('s1', 0, 8, step=2)
-    args.r0 = trial.suggest_float('r0', -2.0, 2.0, step=0.2)
-    args.r1 = trial.suggest_float('r1', -2.0, 2.0, step=0.2)
+    args.r0 = trial.suggest_float('r0', -5.0, 5.0, step=0.2)
+    args.r1 = trial.suggest_float('r1', -5.0, 5.0, step=0.2)
     for k in trial.params:
         res_logger.concat([(k, trial.params[k])])
     logger.log(logging.LTRN, trial.params)
@@ -55,7 +55,7 @@ def objective(trial, args, logger, res_logger):
         dp_bias=args.dp_bias,
         ffn_dim=args.ffn_dim,
         num_global_node=args.num_global_node,
-        aggr_output=args.aggr_output,
+        aggr_output=bool(args.aggr_output),
     )
     logger.log(logging.LTRN, str(model))
     model.to(args.device)
