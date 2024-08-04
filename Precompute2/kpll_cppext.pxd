@@ -15,5 +15,6 @@ cdef extern from "ppll.h":
         bool StoreIndex(char *)
 
         int QueryDistanceParallel(vector[uint32_t] &, vector[uint32_t] &, vector[int] &)
+        int Global(int, vector[int] &, vector[int] &)
         int Label(int, vector[int] &, vector[int] &)
         int SNeighbor(int, int, vector[int] &, vector[int] &)

@@ -26,6 +26,7 @@ class PrunedLandmarkLabeling {
 public:
   void ConstructGraph(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, const std::vector<uint32_t> &alias_inv);
   float ConstructIndex();
+  int Global(const int v, std::vector<int> &pos, std::vector<int> &dist);
   int Label(const int v, std::vector<int> &pos, std::vector<int> &dist);
   int SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist);
 
@@ -93,7 +94,7 @@ ConstructGraph(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt,
 
   // Order vertices by decreasing order of degree
   adj.resize(V);
-  alias.resize(V);
+  alias.resize(V+kNumBitParallelRoots);
   alias_inv = alias_inv_;
   for (size_t i = 0; i < V; i++) alias[alias_inv[i]] = i;
 
@@ -128,6 +129,7 @@ ConstructIndex() {
       }
       usd[r] = true;
       bp_root[i_bpspt] = r;
+      alias[V+i_bpspt] = r;
 
       fill(tmp_d.begin(), tmp_d.end(), INF8);
       fill(tmp_s.begin(), tmp_s.end(), std::make_pair(0, 0));
@@ -199,8 +201,8 @@ ConstructIndex() {
         index_[v].bpspt_s[i_bpspt][0] = tmp_s[v].first;
         index_[v].bpspt_s[i_bpspt][1] = tmp_s[v].second & ~tmp_s[v].first;
       }
-      if (!quiet && r % (kNumBitParallelRoots / 10) == 0){
-        std::cout << time_neighbor+GetCurrentTimeSec() << " (" << (100 * r / kNumBitParallelRoots) << "%) ";
+      if (!quiet && i_bpspt % (kNumBitParallelRoots / 10) == 0){
+        std::cout << time_neighbor+GetCurrentTimeSec() << " (" << (100 * i_bpspt / kNumBitParallelRoots) << "%) ";
       }
     }
   }
@@ -314,7 +316,7 @@ ConstructIndex() {
 
 // ====================
 int PrunedLandmarkLabeling::
-Label(const int v, std::vector<int> &pos, std::vector<int> &dist){
+Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
   pos.clear();
   dist.clear();
   const index_t &idx_v = index_[alias[v]];
@@ -344,10 +346,18 @@ Label(const int v, std::vector<int> &pos, std::vector<int> &dist){
     // std::cout << std::endl;
 
     if (flag){
-      pos.push_back(alias_inv[bp_root[i]]);
+      pos.push_back(V+i);
       dist.push_back(idx_v.bpspt_d[i]);
     }
   }
+  return pos.size();
+}
+
+int PrunedLandmarkLabeling::
+Label(const int v, std::vector<int> &pos, std::vector<int> &dist){
+  pos.clear();
+  dist.clear();
+  const index_t &idx_v = index_[alias[v]];
 
   for (int i = 0; idx_v.spt_v[i] != V; ++i){
     if (idx_v.spt_d[i] == 0) continue;
@@ -393,7 +403,7 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
 
 int PrunedLandmarkLabeling::
 QueryDistance(const uint32_t v, const uint32_t w) {
-  if (v >= V || w >= V) return v == w ? 0 : INT_MAX;
+  if (v >= V+kNumBitParallelRoots || w >= V+kNumBitParallelRoots) return v == w ? 0 : INT_MAX;
 
   const index_t &idx_v = index_[alias[v]];
   const index_t &idx_w = index_[alias[w]];

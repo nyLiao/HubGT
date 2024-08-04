@@ -4,6 +4,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 INF8 = 255
+N_BPROOT = 64
 
 
 def init_params(module, n_layers):
@@ -247,11 +248,11 @@ class GT(nn.Module):
         self.num_global_node = num_global_node
         self.aggr_output = aggr_output
         if self.num_global_node > 0:
-            self.virtual_feat = nn.Embedding(self.num_global_node, hidden_dim)
+            self.virtual_feat = nn.Embedding(N_BPROOT, hidden_dim)
 
         self.node_encoder = nn.Linear(input_dim, hidden_dim)
         self.input_dropout = nn.Dropout(dp_input)
-        encoders = [EncoderLayer(hidden_dim, ffn_dim, dp_ffn, dp_attn, num_heads, attn_bias_dim, num_global_node, dp_bias)
+        encoders = [EncoderLayer(hidden_dim, ffn_dim, dp_ffn, dp_attn, num_heads, attn_bias_dim, 0, dp_bias)
                     for _ in range(n_layers)]
         self.layers = nn.ModuleList(encoders)
         self.final_ln = nn.LayerNorm(hidden_dim)
@@ -263,19 +264,27 @@ class GT(nn.Module):
 
     def forward(self, batched_data):
         attn_bias, x = batched_data.attn_bias, batched_data.x
+        ids = batched_data.ids      # [n_graph, n_node]
         n_graph, n_node = x.size()[:2]
         graph_attn_bias = attn_bias.clone()         # [n_graph, n_node, n_node, hop]
         node_feature = self.node_encoder(x)         # [n_graph, n_node, n_hidden]
 
         if self.num_global_node > 0:
-            vnode_feature = self.virtual_feat.weight.unsqueeze(0).repeat(n_graph, 1, 1)
-            node_feature = torch.cat([node_feature, vnode_feature], dim=1)
+            gids = ids < 0
+            vnode_feature = self.virtual_feat.weight[64+ids[gids]]
+            node_feature[gids] = vnode_feature
+
+            # vnode_feature = self.virtual_feat.weight.unsqueeze(0).repeat(n_graph, 1, 1)
+            # node_feature = torch.cat([node_feature, vnode_feature], dim=1)
 
         # transfomrer encoder
         output = self.input_dropout(node_feature)
         for enc_layer in self.layers:
             output = enc_layer(output, graph_attn_bias)
         output = self.final_ln(output)              # [n_graph, n_node, n_hidden]
+        # sz = output.size()
+        # output = output.view(-1, 8, sz[1], sz[2])
+        # output = torch.mean(output, dim=1)
 
         # output part
         if self.aggr_output:
@@ -289,4 +298,4 @@ class GT(nn.Module):
             output = self.downstream_out_proj(output)
         else:
             output = self.downstream_out_proj(output[:, 0, :])
-        return output
+        return output   # [n_graph, n_class]

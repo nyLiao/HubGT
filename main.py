@@ -9,7 +9,7 @@ import utils
 from utils import (
     Accumulator, Stopwatch,
     ResLogger, CkptLogger,
-    PolynomialDecayLR
+    PolynomialDecayLR,
 )
 
 
@@ -73,7 +73,7 @@ def main(args):
     res_logger.concat([('seed', args.seed),])
 
     # ========== Load data
-    args.ss = args.ss - args.num_global_node
+    # args.ss = args.ss - args.num_global_node
     loader = process_data(args, res_logger)
     with args.device:
         torch.cuda.empty_cache()

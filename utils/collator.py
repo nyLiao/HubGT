@@ -9,12 +9,12 @@ class Batch(object):
         super(Batch, self).__init__()
         self.x, self.y = x, y
         self.attn_bias = attn_bias
-        # self.ids = ids
+        self.ids = ids
 
     def to(self, device):
         self.x, self.y = self.x.to(device), self.y.to(device)
         self.attn_bias = self.attn_bias.to(device)
-        # self.ids = self.ids.to(device)
+        self.ids = self.ids.to(device)
         return self
 
     def __len__(self):
@@ -46,4 +46,8 @@ def collate(idx, ids, graph, std=0.0):
     if std > 0:
         norm = torch.norm(x)
         x += torch.normal(0, std * norm, x.shape, device=x.device, dtype=x.dtype)
-    return Batch(attn_bias, x, y)
+
+    num_nodes = graph.num_nodes
+    N_BPROOT = 64
+    ids[ids >= num_nodes] -= (num_nodes + N_BPROOT)
+    return Batch(attn_bias, x, y, ids)

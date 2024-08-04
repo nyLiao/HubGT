@@ -90,6 +90,11 @@ def process_data(args, res_logger=utils.ResLogger()):
                 n1_lst[node].append((int(ego), val))
         s0 = min(args.s0, s0_actual)
 
+        nodes0g, val0g, s0g_actual = py_pll.glabel(ego)
+        val0g = np.array(val0g) ** args.r0
+        val0g[val0g == np.inf] = 0
+        s0g = min(args.num_global_node, s0g_actual)
+
         s1_actual = len(n1_lst[int(ego)])
         if s1_actual > 0:
             nodes1, val1 = zip(*n1_lst[int(ego)])
@@ -98,7 +103,7 @@ def process_data(args, res_logger=utils.ResLogger()):
             s1_actual = len(nodes1)
         s1 = min(args.s1, s1_actual)
 
-        s2 = s_total - s0 - s1 - 1
+        s2 = s_total - s0 - s0g - s1 - 1
         s2_actual = 0
         if s2 > 0:
             nodes2, val2, s2_actual = py_pll.s_neighbor(ego, s2)
@@ -108,17 +113,19 @@ def process_data(args, res_logger=utils.ResLogger()):
         # ===== Sample neighbors
         ids_i = np.full((args.ns, s_total), ego, dtype=np.int64)
         ids_i[:, 1:s0+1] = choice_cap(nodes0, s0, args.ns, val0)
+        ids_i[:, s0+1:s0+s0g+1] = choice_cap(nodes0g, s0g, args.ns, val0g)
         if s1 > 0:
-            ids_i[:, s0+1:s0+s1+1] = choice_cap(nodes1, s1, args.ns, val1)
+            ids_i[:, s0+s0g+1:s0+s0g+s1+1] = choice_cap(nodes1, s1, args.ns, val1)
         if s2 > 0:
-            ids_i[:, s0+s1+1:s0+s1+s2+1] = choice_cap(nodes2, s2, args.ns, val2)
+            ids_i[:, s0+s0g+s1+1:s0+s0g+s1+s2+1] = choice_cap(nodes2, s2, args.ns, val2)
         ids[ego] = torch.tensor(ids_i, dtype=int)
 
         stopwatch_sample.pause()
+    N_BPROOT = 64
 
     # ===== Aggregate SPD graph
     id_map = torch.randperm(num_nodes).split(num_nodes // args.num_workers)
-    ids_chunks = [(num_nodes, ids[id_i]) for id_i in id_map]
+    ids_chunks = [(num_nodes+N_BPROOT, ids[id_i]) for id_i in id_map]
     with Pool(args.num_workers) as pool:
         spd = pool.map(aggr_csr, ids_chunks)
 
@@ -133,6 +140,8 @@ def process_data(args, res_logger=utils.ResLogger()):
     spd_bias = torch.tensor(spd_bias, dtype=int).view(-1, args.kbias)
 
     # ===== Extend features
+    y = torch.cat([y, -torch.ones(N_BPROOT, dtype=y.dtype)])
+    x = torch.cat([x, torch.zeros(N_BPROOT, x.size(1), dtype=x.dtype)], dim=0)
     if args.kfeat > 0:
         rows = cols = np.arange(x.size(0), dtype=np.uint32)
         with stopwatch_spd:
