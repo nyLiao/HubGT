@@ -24,7 +24,8 @@
 
 class PrunedLandmarkLabeling {
 public:
-  float ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt);
+  void ConstructGraph(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, const std::vector<uint32_t> &alias_inv);
+  float ConstructIndex();
   int Label(const int v, std::vector<int> &pos, std::vector<int> &dist);
   int SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist);
 
@@ -43,7 +44,7 @@ public:
   double AverageLabelSize();
 
   PrunedLandmarkLabeling()
-      : V(0), index_(NULL) {}
+      : V(0), E(0), index_(NULL) {}
   virtual ~PrunedLandmarkLabeling() {
     Free();
   }
@@ -61,7 +62,7 @@ private:
     uint8_t  *spt_d;                // PLL Shortest Path distances
   } __attribute__((aligned(64)));   // Aligned for cache lines
 
-  size_t V;
+  size_t V, E;
   bool quiet = false;
   index_t *index_;
   std::vector<std::vector<uint32_t> > adj;
@@ -82,38 +83,29 @@ private:
 const uint8_t PrunedLandmarkLabeling::INF8 = std::numeric_limits<uint8_t>::max() / 2;
 
 // ====================
-float PrunedLandmarkLabeling::
-ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt) {
+void PrunedLandmarkLabeling::
+ConstructGraph(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, const std::vector<uint32_t> &alias_inv_) {
   // Prepare the adjacency list and index space
-  double time_neighbor, time_search;
-  size_t E = ns.size();
   Free();
   this->V = 0;
-  V = std::max(*std::max_element(ns.begin(), ns.end()), *std::max_element(nt.begin(), nt.end())) + 1;
-  if (!quiet) std::cout << "Building index -- Nodes: " << V << ", Edges: " << E << std::endl;
+  this->E = ns.size();
+  V = *std::max_element(alias_inv_.begin(), alias_inv_.end()) + 1;
 
   // Order vertices by decreasing order of degree
   adj.resize(V);
   alias.resize(V);
-  alias_inv.resize(V);
-  {
-    std::vector<std::pair<uint32_t, uint32_t> > deg(V, std::make_pair(0, 0));
-    for (size_t i = 0; i < V; i++) deg[i].second = i;
-    for (size_t i = 0; i < ns.size(); i++){
-      deg[ns[i]].first++;
-      deg[nt[i]].first++;
-    }
-    std::sort(deg.begin(), deg.end(), std::greater<std::pair<uint32_t, uint32_t> >());
-    for (size_t i = 0; i < V; i++) {
-      alias[deg[i].second] = i;
-      alias_inv[i] = deg[i].second;
-    }
-  }
+  alias_inv = alias_inv_;
+  for (size_t i = 0; i < V; i++) alias[alias_inv[i]] = i;
 
-  for (size_t i = 0; i < ns.size(); i++){
+  for (size_t i = 0; i < E; i++){
     adj[alias[ns[i]]].push_back(alias[nt[i]]);
-    adj[alias[nt[i]]].push_back(alias[ns[i]]);
   }
+}
+
+float PrunedLandmarkLabeling::
+ConstructIndex() {
+  double time_neighbor, time_search;
+  if (!quiet) std::cout << "Building index -- Nodes: " << V << ", Edges: " << E << std::endl;
 
   // Bit-parallel labeling
   Init();
@@ -206,6 +198,9 @@ ConstructIndex(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt)
         index_[v].bpspt_d[i_bpspt] = tmp_d[v];
         index_[v].bpspt_s[i_bpspt][0] = tmp_s[v].first;
         index_[v].bpspt_s[i_bpspt][1] = tmp_s[v].second & ~tmp_s[v].first;
+      }
+      if (!quiet && r % (kNumBitParallelRoots / 10) == 0){
+        std::cout << time_neighbor+GetCurrentTimeSec() << " (" << (100 * r / kNumBitParallelRoots) << "%) ";
       }
     }
   }
@@ -497,6 +492,7 @@ bool PrunedLandmarkLabeling::
 StoreIndex(std::ofstream &ofs) {
 #define WRITE_BINARY(value) (ofs.write((const char*)&(value), sizeof(value)))
   WRITE_BINARY(V);
+  WRITE_BINARY(E);
   write_vector(ofs, alias);
   write_vector(ofs, alias_inv);
   write_vector(ofs, bp_root);
@@ -536,6 +532,7 @@ LoadIndex(std::ifstream &ifs) {
 #define READ_BINARY(value) (ifs.read((char*)&(value), sizeof(value)))
   Free();
   READ_BINARY(V);
+  READ_BINARY(E);
   read_vector(ifs, alias);
   read_vector(ifs, alias_inv);
   read_vector(ifs, bp_root);
@@ -594,6 +591,7 @@ Free() {
   free(index_);
   index_ = NULL;
   V = 0;
+  E = 0;
 }
 
 double PrunedLandmarkLabeling::

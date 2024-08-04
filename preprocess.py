@@ -65,13 +65,12 @@ def process_data(args, res_logger=utils.ResLogger()):
     deg = pyg_utils.degree(data.edge_index[0], num_nodes, dtype=int)
     id_map = torch.argsort(deg, descending=False)
     deg_max = deg[id_map[-1]]
-    id_map_inv = torch.empty_like(id_map)
-    id_map_inv[id_map] = torch.arange(num_nodes)
 
     # ===== Build label
     py_pll = PyPLL()
+    # time_index = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
     time_index = py_pll.get_index(
-        edge_index, str(args.logpath.parent), args.quiet, args.index)
+        edge_index, np.flip(id_map.numpy().astype(np.uint32)), str(args.logpath.parent), args.quiet, args.index)
     del edge_index, data.edge_index, deg
     data.edge_index = None
 
@@ -130,6 +129,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     spd.data = np.arange(len(rows), dtype=int)
     with stopwatch_spd:
         spd_bias = py_pll.k_distance_parallel(rows, cols)
+        # spd_bias = py_pll.k_distance_parallel(rows, cols, args.kfeat)
     spd_bias = torch.tensor(spd_bias, dtype=int).view(-1, args.kbias)
 
     # ===== Extend features

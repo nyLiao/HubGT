@@ -220,6 +220,7 @@ class SingleGraphLoader(object):
                 class_name = pyg_mapping[self.data]
             elif self.data in ["flickr", "reddit", "actor"]:
                 class_name = self.data.capitalize()
+                kwargs['root'] = kwargs['root'].joinpath(class_name)
                 kwargs.pop('name')
             else:
                 raise ValueError(f"Dataset '{self}' not found.")

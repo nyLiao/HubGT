@@ -13,14 +13,15 @@ cdef class PyPLL:
     def __cinit__(self):
         self.c_pll = PrunedLandmarkLabeling()
 
-    def get_index(self, np.ndarray[uint32_t, ndim=2] edge_index, str path_cache, bool quiet, bool index):
+    def get_index(self, np.ndarray[uint32_t, ndim=2] edge_index, np.ndarray[uint32_t, ndim=1] alias_inv, str path_cache, bool quiet, bool index):
         path_cache = path_cache.replace('/log', '/cache')
         os.makedirs(path_cache, exist_ok=True)
         path_cache += '/index.bin'
         if not os.path.exists(path_cache) or index:
             ns, nt = edge_index
             self.c_pll.SetArgs(quiet)
-            res = self.c_pll.ConstructIndex(ns, nt)
+            self.c_pll.ConstructGraph(ns, nt, alias_inv)
+            res = self.c_pll.ConstructIndex()
             if not quiet:
                 self.store_index(path_cache)
             return res
@@ -28,10 +29,11 @@ cdef class PyPLL:
             self.c_pll.SetArgs(quiet)
             return 1.0 - self.load_index(path_cache)
 
-    def construct_index(self, np.ndarray[uint32_t, ndim=2] edge_index, bool quiet):
+    def construct_index(self, np.ndarray[uint32_t, ndim=2] edge_index, np.ndarray[uint32_t, ndim=1] alias_inv, bool quiet):
         ns, nt = edge_index
         self.c_pll.SetArgs(quiet)
-        return self.c_pll.ConstructIndex(ns, nt)
+        self.c_pll.ConstructGraph(ns, nt, alias_inv)
+        return self.c_pll.ConstructIndex()
 
     def load_index(self, str filename):
         return self.c_pll.LoadIndex(filename.encode('utf-8'))
