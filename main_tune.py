@@ -1,3 +1,4 @@
+import os
 import logging
 import optuna
 from copy import deepcopy
@@ -7,12 +8,12 @@ import torch
 import torch.nn.functional as F
 
 from model import GT
-from preprocess import process_data
+from preprocess import process_data, N_BPROOT
 import utils
 from utils import (
     Accumulator, Stopwatch,
     ResLogger, CkptLogger,
-    PolynomialDecayLR
+    PolynomialDecayLR,
 )
 from main import learn, eval
 
@@ -24,8 +25,8 @@ def objective(trial, args, logger, res_logger):
     args.aggr_output = trial.suggest_int('aggr_output', 0, 1)
     # args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
     args.ns = trial.suggest_int('ns', 2, 10, step=2)
-    args.num_global_node = trial.suggest_int('num_global_node', 0, 3)
-    args.s0 = trial.suggest_int('s0', 0, 20, step=2)
+    args.s0 = trial.suggest_int('s0', 0, 16, step=2)
+    args.s0g = trial.suggest_int('s0g', 0, 8, step=2)
     args.s1 = trial.suggest_int('s1', 0, 8, step=2)
     args.r0 = trial.suggest_float('r0', -5.0, 5.0, step=0.2)
     args.r1 = trial.suggest_float('r1', -5.0, 5.0, step=0.2)
@@ -34,8 +35,8 @@ def objective(trial, args, logger, res_logger):
     logger.log(logging.LTRN, trial.params)
 
     # ========== Load data
-    args.ss = args.ss - args.num_global_node
-    args.quiet = True
+    if os.path.exists('./cache/'+args.data+'/index.bin'):
+        args.quiet = True
     loader = process_data(args, res_logger)
     with args.device:
         torch.cuda.empty_cache()
@@ -54,7 +55,7 @@ def objective(trial, args, logger, res_logger):
         dp_input=args.dp_input,
         dp_bias=args.dp_bias,
         ffn_dim=args.ffn_dim,
-        num_global_node=args.num_global_node,
+        num_global_node=N_BPROOT,
         aggr_output=bool(args.aggr_output),
     )
     logger.log(logging.LTRN, str(model))
@@ -77,7 +78,7 @@ def objective(trial, args, logger, res_logger):
             patience=args.patience,
             period=1,
             prefix=('-'.join(filter(None, ['model', args.suffix]))),)
-    logger.log(logging.LTRN, f'Total params: {utils.ParamNumel(model)(unit='K')} K')
+    logger.log(logging.LTRN, f'Total params: {utils.ParamNumel(model)(unit="K")} K')
 
     # ========== Run training
     logger.debug('-'*20 + f" Start training: {args.epoch} " + '-'*20)
@@ -142,7 +143,7 @@ def main(args):
         direction='maximize',
         sampler=optuna.samplers.TPESampler(),
         pruner=optuna.pruners.HyperbandPruner(
-            min_resource=2,
+            min_resource=3,
             max_resource=args.epoch,
             reduction_factor=3),
         load_if_exists=True)

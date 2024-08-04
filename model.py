@@ -4,7 +4,6 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 INF8 = 255
-N_BPROOT = 64
 
 
 def init_params(module, n_layers):
@@ -247,8 +246,7 @@ class GT(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_global_node = num_global_node
         self.aggr_output = aggr_output
-        if self.num_global_node > 0:
-            self.virtual_feat = nn.Embedding(N_BPROOT, hidden_dim)
+        self.virtual_feat = nn.Parameter(torch.zeros(num_global_node, hidden_dim))
 
         self.node_encoder = nn.Linear(input_dim, hidden_dim)
         self.input_dropout = nn.Dropout(dp_input)
@@ -261,6 +259,7 @@ class GT(nn.Module):
         self.downstream_out_proj = nn.Linear(hidden_dim, output_dim)
 
         self.apply(lambda module: init_params(module, n_layers=n_layers))
+        self.virtual_feat.data.normal_()
 
     def forward(self, batched_data):
         attn_bias, x = batched_data.attn_bias, batched_data.x
@@ -271,11 +270,7 @@ class GT(nn.Module):
 
         if self.num_global_node > 0:
             gids = ids < 0
-            vnode_feature = self.virtual_feat.weight[64+ids[gids]]
-            node_feature[gids] = vnode_feature
-
-            # vnode_feature = self.virtual_feat.weight.unsqueeze(0).repeat(n_graph, 1, 1)
-            # node_feature = torch.cat([node_feature, vnode_feature], dim=1)
+            node_feature[gids] += self.virtual_feat[64+ids[gids]]
 
         # transfomrer encoder
         output = self.input_dropout(node_feature)

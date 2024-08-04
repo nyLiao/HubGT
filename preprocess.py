@@ -1,4 +1,5 @@
 import os
+import gc
 import logging
 from tqdm import tqdm
 from functools import partial
@@ -16,8 +17,12 @@ import utils
 from utils.collator import collate, INF8
 from Precompute2 import PyPLL
 
+N_BPROOT = 128
+
 
 def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
+    if size == 0:
+        return
     if len(a) <= size:
         return np.tile(a, (nsample, 1))
     p = p / np.sum(p)
@@ -25,13 +30,31 @@ def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
     return np.vstack(ret)
 
 
-def aggr_csr(chunk):
-    num_nodes, ids_chunk = chunk
+def callback_sample(ids, ret):
+    ego, ids_i = ret
+    ids[ego] = ids_i
+
+
+def aggr_sample(ego, ziplst, **args):
+    # Sample neighbors
+    ids_i = np.full((args['ns'], args['ss']), ego, dtype=np.int32)
+    s_top = 1
+    for nodes, val, r, s in ziplst:
+        if s == 0:
+            continue
+        val = np.asarray(val) ** r
+        val = np.nan_to_num(val, posinf=0)
+        ids_i[:, s_top:s_top+s] = choice_cap(nodes, s, args['ns'], val)
+        s_top += s
+    return ego, ids_i
+
+
+def aggr_csr(ids_chunk, num_nodes):
     # Dense connection in each subgraph
     spd = sp.csr_matrix((num_nodes, num_nodes), dtype=int,)
     for ids_i in ids_chunk:
         indices_i = []
-        for ids_s in ids_i.numpy():
+        for ids_s in ids_i:
             subset = np.unique(ids_s)
             s_row, s_col = np.triu_indices(len(subset), 1)
             s_row, s_col = subset[s_row], subset[s_col]
@@ -63,71 +86,65 @@ def process_data(args, res_logger=utils.ResLogger()):
         logger.warning(f'Warning: Directed graph.')
 
     deg = pyg_utils.degree(data.edge_index[0], num_nodes, dtype=int)
-    id_map = torch.argsort(deg, descending=False)
+    id_map = torch.argsort(deg, descending=False).numpy().astype(np.uint32)
     deg_max = deg[id_map[-1]]
 
     # ===== Build label
     py_pll = PyPLL()
     # time_index = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
     time_index = py_pll.get_index(
-        edge_index, np.flip(id_map.numpy().astype(np.uint32)), str(args.logpath.parent), args.quiet, args.index)
+        edge_index, np.flip(id_map), str(args.logpath.parent), args.quiet, args.index)
     del edge_index, data.edge_index, deg
     data.edge_index = None
 
     stopwatch_sample, stopwatch_spd = utils.Stopwatch(), utils.Stopwatch()
-    s_total = args.ss
-    ids = torch.zeros((num_nodes, args.ns, s_total), dtype=int)
+    ids = np.zeros((num_nodes, args.ns, args.ss), dtype=int)
+    fn_callback = partial(callback_sample, ids)
     n1_lst = {e: [] for e in range(num_nodes)}
-    for iego, ego in enumerate(tqdm(id_map, disable=args.quiet)):
-        stopwatch_sample.start()
+    pool = Pool(args.num_workers)
+    stopwatch_sample.start()
+    for ego in id_map:
         # ===== Generate SPD neighborhood
         # TODO: fix directed API
         nodes0, val0, s0_actual = py_pll.label(ego)
-        val0 = np.array(val0) ** args.r0
-        val0[val0 == np.inf] = 0
         if args.s1 > 0:
             for node, val in zip(nodes0, val0):
-                n1_lst[node].append((int(ego), val))
+                n1_lst[node].append((ego, val))
         s0 = min(args.s0, s0_actual)
+        ziplst = [(nodes0, val0, args.r0, s0)] if s0 > 0 else []
 
         nodes0g, val0g, s0g_actual = py_pll.glabel(ego)
-        val0g = np.array(val0g) ** args.r0
-        val0g[val0g == np.inf] = 0
-        s0g = min(args.num_global_node, s0g_actual)
+        s0g = min(args.s0g, s0g_actual)
+        if s0g > 0:
+            ziplst.append((nodes0g, val0g, args.r0, s0g))
 
-        s1_actual = len(n1_lst[int(ego)])
+        s1_actual = len(n1_lst[ego])
         if s1_actual > 0:
-            nodes1, val1 = zip(*n1_lst[int(ego)])
+            nodes1, val1 = zip(*n1_lst[ego])
             nodes1 = list(nodes1)
-            val1 = np.array(val1) ** args.r0
-            s1_actual = len(nodes1)
-        s1 = min(args.s1, s1_actual)
+            s1_actual = min(args.s1, len(nodes1))
+            ziplst.append((nodes1, val1, args.r0, s1_actual))
+        s1 = s1_actual
+        del n1_lst[ego]
 
-        s2 = s_total - s0 - s0g - s1 - 1
+        s2 = args.ss - s0 - s0g - s1 - 1
         s2_actual = 0
         if s2 > 0:
             nodes2, val2, s2_actual = py_pll.s_neighbor(ego, s2)
-            val2 = np.array(val2) ** args.r1
-        s2 = min(s2, s2_actual)
+            s2_actual = min(s2_actual, s2)
+            ziplst.append((nodes2, val2, args.r1, s2_actual))
+        s2 = s2_actual
 
-        # ===== Sample neighbors
-        ids_i = np.full((args.ns, s_total), ego, dtype=np.int64)
-        ids_i[:, 1:s0+1] = choice_cap(nodes0, s0, args.ns, val0)
-        ids_i[:, s0+1:s0+s0g+1] = choice_cap(nodes0g, s0g, args.ns, val0g)
-        if s1 > 0:
-            ids_i[:, s0+s0g+1:s0+s0g+s1+1] = choice_cap(nodes1, s1, args.ns, val1)
-        if s2 > 0:
-            ids_i[:, s0+s0g+s1+1:s0+s0g+s1+s2+1] = choice_cap(nodes2, s2, args.ns, val2)
-        ids[ego] = torch.tensor(ids_i, dtype=int)
-
-        stopwatch_sample.pause()
-    N_BPROOT = 64
+        kwargs = {'ns': args.ns, 'ss': args.ss}
+        pool.apply_async(aggr_sample, (ego, ziplst), kwargs, callback=fn_callback)
+    pool.close()
+    pool.join()
+    stopwatch_sample.pause()
 
     # ===== Aggregate SPD graph
-    id_map = torch.randperm(num_nodes).split(num_nodes // args.num_workers)
-    ids_chunks = [(num_nodes+N_BPROOT, ids[id_i]) for id_i in id_map]
+    id_map = np.array_split(np.random.permutation(num_nodes), args.num_workers)
     with Pool(args.num_workers) as pool:
-        spd = pool.map(aggr_csr, ids_chunks)
+        spd = pool.starmap(aggr_csr, ((ids[id_i], num_nodes+N_BPROOT) for id_i in id_map))
 
     spd = sum(spd)
     spd.sum_duplicates()
@@ -138,6 +155,8 @@ def process_data(args, res_logger=utils.ResLogger()):
         spd_bias = py_pll.k_distance_parallel(rows, cols)
         # spd_bias = py_pll.k_distance_parallel(rows, cols, args.kfeat)
     spd_bias = torch.tensor(spd_bias, dtype=int).view(-1, args.kbias)
+    logger.log(logging.LTRN, f'SPD size: {spd.nnz}, feat size: {x.size(1)}, max deg: {deg_max}')
+    gc.collect()
 
     # ===== Extend features
     y = torch.cat([y, -torch.ones(N_BPROOT, dtype=y.dtype)])
@@ -150,12 +169,11 @@ def process_data(args, res_logger=utils.ResLogger()):
         x_extend = (INF8 - x_extend) / INF8
         x = torch.cat([x, x_extend], dim=1)
         args.num_features = x.size(1)
+    logger.log(logging.LTRN, f'Indexing time: {time_index:.2f}, Neighbor time: {stopwatch_sample}, SPD time: {stopwatch_spd}')
 
     # ===== Data loader
     graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd.tocsr(), spd_bias=spd_bias)
     graph.contiguous('x', 'y', 'spd_bias')
-    # torch.save(graph, './cache/'+args.data+'/graph.pt')
-    # torch.save(ids, './cache/'+args.data+'/ids.pt')
 
     s = ''
     loader = {}
@@ -169,14 +187,12 @@ def process_data(args, res_logger=utils.ResLogger()):
             num_workers=args.num_workers,
             shuffle=shuffle,
             collate_fn=partial(collate,
-                ids=ids,
+                ids=torch.from_numpy(ids),
                 graph=graph,
                 std=std,
         ))
         s += f'{split}: {mask.sum().item()}, '
     logger.log(logging.LTRN, s)
-    logger.log(logging.LTRN, f'SPD size: {spd.nnz}, feat size: {x.size(1)}, max deg: {deg_max}')
-    logger.log(logging.LTRN, f'Indexing time: {time_index:.2f}, Neighbor time: {stopwatch_sample}, SPD time: {stopwatch_spd}')
 
     res_logger.concat([
         ('time_index', time_index),

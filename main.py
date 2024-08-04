@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from model import GT
-from preprocess import process_data
+from preprocess import process_data, N_BPROOT
 import utils
 from utils import (
     Accumulator, Stopwatch,
@@ -73,7 +73,6 @@ def main(args):
     res_logger.concat([('seed', args.seed),])
 
     # ========== Load data
-    # args.ss = args.ss - args.num_global_node
     loader = process_data(args, res_logger)
     with args.device:
         torch.cuda.empty_cache()
@@ -92,7 +91,7 @@ def main(args):
         dp_input=args.dp_input,
         dp_bias=args.dp_bias,
         ffn_dim=args.ffn_dim,
-        num_global_node=args.num_global_node,
+        num_global_node=N_BPROOT,
         aggr_output=args.aggr_output,
     )
     logger.log(logging.LTRN, str(model))
@@ -115,7 +114,7 @@ def main(args):
             patience=args.patience,
             period=1,
             prefix=('-'.join(filter(None, ['model', args.suffix]))),)
-    logger.log(logging.LTRN, f'Total params: {utils.ParamNumel(model)(unit='K')} K')
+    logger.log(logging.LTRN, f'Total params: {utils.ParamNumel(model)(unit="K")} K')
 
     # ========== Run training
     logger.debug('-'*20 + f" Start training: {args.epoch} " + '-'*20)

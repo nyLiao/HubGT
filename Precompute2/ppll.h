@@ -52,7 +52,7 @@ public:
 
 private:
   static const uint8_t INF8;  // For unreachable pairs
-  static const int kNumBitParallelRoots = 64;
+  static const int kNumBitParallelRoots = 128;
   static const int NUMTHREAD = 16;
 
   // 4 * 33 * BP + 40 * |L|
@@ -68,7 +68,6 @@ private:
   index_t *index_;
   std::vector<std::vector<uint32_t> > adj;
   std::vector<uint32_t> alias, alias_inv;
-  std::vector<uint32_t> bp_root;
 
   inline void Init();
   void Free();
@@ -110,7 +109,6 @@ ConstructIndex() {
 
   // Bit-parallel labeling
   Init();
-  bp_root.resize(kNumBitParallelRoots);
   time_neighbor = -GetCurrentTimeSec();
   std::vector<bool> usd(V, false);  // Used as root? (in new label)
   {
@@ -128,7 +126,6 @@ ConstructIndex() {
         continue;
       }
       usd[r] = true;
-      bp_root[i_bpspt] = r;
       alias[V+i_bpspt] = r;
 
       fill(tmp_d.begin(), tmp_d.end(), INF8);
@@ -207,6 +204,7 @@ ConstructIndex() {
     }
   }
   time_neighbor += GetCurrentTimeSec();
+  if (!quiet) std::cout << "| Search time: " << time_neighbor << ", BPRoot Size: " << kNumBitParallelRoots << std::endl;
 
   // Pruned labeling
   time_search = -GetCurrentTimeSec();
@@ -309,8 +307,7 @@ ConstructIndex() {
   }
   time_search += GetCurrentTimeSec();
 
-  if (!quiet) std::cout << std::endl << "Neighbor time: " << time_neighbor << ", Search time: " << time_search
-    << ", Avg Label Size: " << AverageLabelSize() << std::endl;
+  if (!quiet) std::cout << "| Search time: " << time_search << ", Avg Label Size: " << AverageLabelSize() << std::endl;
   return time_neighbor + time_search;
 }
 
@@ -324,7 +321,7 @@ Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
 
   for (int i = 0; i < kNumBitParallelRoots; ++i){
     if (idx_v.bpspt_d[i] > 16 || idx_v.bpspt_d[i] == 0) continue;
-    const index_t &idx_w = index_[bp_root[i]];
+    const index_t &idx_w = index_[alias[V+i]];
     flag = true;
 
     // std::cout << "  " << v << " " << alias_inv[bp_root[i]] << " " << int(idx_v.bpspt_d[i]) ;
@@ -505,7 +502,6 @@ StoreIndex(std::ofstream &ofs) {
   WRITE_BINARY(E);
   write_vector(ofs, alias);
   write_vector(ofs, alias_inv);
-  write_vector(ofs, bp_root);
   for (size_t v = 0; v < V; ++v){
     write_vector(ofs, adj[v]);
   }
@@ -545,7 +541,6 @@ LoadIndex(std::ifstream &ifs) {
   READ_BINARY(E);
   read_vector(ifs, alias);
   read_vector(ifs, alias_inv);
-  read_vector(ifs, bp_root);
   adj.resize(V);
   for (size_t v = 0; v < V; ++v){
     read_vector(ifs, adj[v]);
