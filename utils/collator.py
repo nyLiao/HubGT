@@ -22,7 +22,7 @@ class Batch(object):
 
 
 def collate(idx, ids, graph, std=0.0):
-    idx = torch.stack(idx, dim=0).flatten()
+    idx = torch.stack(idx, dim=0).flatten() # avoid slice and copy for ids
     batch_size = idx.size(0)
     _, ns, s_total = ids.size()
     kbias = graph.spd_bias.size(1)

@@ -237,6 +237,7 @@ class GT(nn.Module):
         dp_attn,
         ffn_dim,
         num_global_node,
+        var_vfeat,
         aggr_output,
     ):
         super().__init__()
@@ -244,9 +245,11 @@ class GT(nn.Module):
         self.num_heads = num_heads
         self.n_layers = n_layers
         self.hidden_dim = hidden_dim
-        self.num_global_node = num_global_node
+        self.var_vfeat = var_vfeat
         self.aggr_output = aggr_output
-        self.virtual_feat = nn.Parameter(torch.zeros(num_global_node, hidden_dim))
+        if var_vfeat:
+            self.virtual_feat = nn.Parameter(torch.zeros(num_global_node, hidden_dim))
+            self.virtual_feat.data.normal_()
 
         self.node_encoder = nn.Linear(input_dim, hidden_dim)
         self.input_dropout = nn.Dropout(dp_input)
@@ -259,7 +262,6 @@ class GT(nn.Module):
         self.downstream_out_proj = nn.Linear(hidden_dim, output_dim)
 
         self.apply(lambda module: init_params(module, n_layers=n_layers))
-        self.virtual_feat.data.normal_()
 
     def forward(self, batched_data):
         attn_bias, x = batched_data.attn_bias, batched_data.x
@@ -268,7 +270,7 @@ class GT(nn.Module):
         graph_attn_bias = attn_bias.clone()         # [n_graph, n_node, n_node, hop]
         node_feature = self.node_encoder(x)         # [n_graph, n_node, n_hidden]
 
-        if self.num_global_node > 0:
+        if self.var_vfeat:
             gids = ids < 0
             node_feature[gids] += self.virtual_feat[64+ids[gids]]
 

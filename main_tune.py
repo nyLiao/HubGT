@@ -23,6 +23,7 @@ def objective(trial, args, logger, res_logger):
     args = deepcopy(args)
     # args.perturb_std = trial.suggest_float('perturb_std', 0.0, 0.05, step=0.001)
     args.aggr_output = trial.suggest_int('aggr_output', 0, 1)
+    # args.var_vfeat = trial.suggest_int('var_vfeat', 0, 1)
     # args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
     args.ns = trial.suggest_int('ns', 2, 10, step=2)
     args.s0 = trial.suggest_int('s0', 0, 16, step=2)
@@ -56,6 +57,7 @@ def objective(trial, args, logger, res_logger):
         dp_bias=args.dp_bias,
         ffn_dim=args.ffn_dim,
         num_global_node=N_BPROOT,
+        var_vfeat=bool(args.var_vfeat),
         aggr_output=bool(args.aggr_output),
     )
     logger.log(logging.LTRN, str(model))

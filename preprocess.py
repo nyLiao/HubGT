@@ -30,7 +30,8 @@ def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
     return np.vstack(ret)
 
 
-def callback_sample(ids, ret):
+def callback_sample(ids, pbar, ret):
+    pbar.update(1)
     ego, ids_i = ret
     ids[ego] = ids_i
 
@@ -67,6 +68,7 @@ def aggr_csr(ids_chunk, num_nodes):
             (values_i, indices_i),
             shape=(num_nodes, num_nodes),
         ).tocsr()
+    spd.sum_duplicates()
     return spd
 
 
@@ -85,8 +87,8 @@ def process_data(args, res_logger=utils.ResLogger()):
     if not undirected:
         logger.warning(f'Warning: Directed graph.')
 
-    deg = pyg_utils.degree(data.edge_index[0], num_nodes, dtype=int)
-    id_map = torch.argsort(deg, descending=False).numpy().astype(np.uint32)
+    deg = np.bincount(edge_index[0], minlength=num_nodes)
+    id_map = np.argsort(deg, kind='stable').astype(np.uint32)
     deg_max = deg[id_map[-1]]
 
     # ===== Build label
@@ -99,11 +101,12 @@ def process_data(args, res_logger=utils.ResLogger()):
 
     stopwatch_sample, stopwatch_spd = utils.Stopwatch(), utils.Stopwatch()
     ids = np.zeros((num_nodes, args.ns, args.ss), dtype=int)
-    fn_callback = partial(callback_sample, ids)
+    pbar = tqdm(total=num_nodes, disable=args.quiet, desc='Sample')
+    fn_callback = partial(callback_sample, ids, pbar)
     n1_lst = {e: [] for e in range(num_nodes)}
     pool = Pool(args.num_workers)
-    stopwatch_sample.start()
     for ego in id_map:
+        stopwatch_sample.start()
         # ===== Generate SPD neighborhood
         # TODO: fix directed API
         nodes0, val0, s0_actual = py_pll.label(ego)
@@ -137,22 +140,22 @@ def process_data(args, res_logger=utils.ResLogger()):
 
         kwargs = {'ns': args.ns, 'ss': args.ss}
         pool.apply_async(aggr_sample, (ego, ziplst), kwargs, callback=fn_callback)
+        stopwatch_sample.pause()
     pool.close()
     pool.join()
-    stopwatch_sample.pause()
+    pbar.close()
 
     # ===== Aggregate SPD graph
-    id_map = np.array_split(np.random.permutation(num_nodes), args.num_workers)
+    chunk_num = args.num_workers ** max(np.round(np.log10(num_nodes)/3), 1)
+    id_map = np.array_split(np.random.permutation(num_nodes), chunk_num)
     with Pool(args.num_workers) as pool:
         spd = pool.starmap(aggr_csr, ((ids[id_i], num_nodes+N_BPROOT) for id_i in id_map))
-
     spd = sum(spd)
-    spd.sum_duplicates()
-    rows, cols, _ = sp.find(spd)
-    rows, cols = rows.astype(np.uint32), cols.astype(np.uint32)
-    spd.data = np.arange(len(rows), dtype=int)
+
+    spd = spd.tocoo(copy=False)
+    spd.data = np.arange(spd.nnz, dtype=int)
     with stopwatch_spd:
-        spd_bias = py_pll.k_distance_parallel(rows, cols)
+        spd_bias = py_pll.k_distance_parallel(spd.row, spd.col)
         # spd_bias = py_pll.k_distance_parallel(rows, cols, args.kfeat)
     spd_bias = torch.tensor(spd_bias, dtype=int).view(-1, args.kbias)
     logger.log(logging.LTRN, f'SPD size: {spd.nnz}, feat size: {x.size(1)}, max deg: {deg_max}')
@@ -174,6 +177,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     # ===== Data loader
     graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd.tocsr(), spd_bias=spd_bias)
     graph.contiguous('x', 'y', 'spd_bias')
+    ids = torch.from_numpy(ids).contiguous()
 
     s = ''
     loader = {}
@@ -184,10 +188,10 @@ def process_data(args, res_logger=utils.ResLogger()):
         loader[split] = DataLoader(
             pyg_utils.mask_to_index(mask),
             batch_size=args.batch,
-            num_workers=args.num_workers,
+            num_workers=0,
             shuffle=shuffle,
             collate_fn=partial(collate,
-                ids=torch.from_numpy(ids),
+                ids=ids,
                 graph=graph,
                 std=std,
         ))

@@ -30,9 +30,9 @@ public:
   int Label(const int v, std::vector<int> &pos, std::vector<int> &dist);
   int SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist);
 
-  inline int QueryDistance(const uint32_t v, const uint32_t w);
-  int QueryDistanceLoop(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t st, size_t ed, std::vector<int> &ret);
-  int QueryDistanceParallel(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, std::vector<int> &ret);
+  inline int QueryDistance(const int v, const int w);
+  int QueryDistanceLoop(const std::vector<int> &ns, const std::vector<int> &nt, size_t st, size_t ed, std::vector<int> &ret);
+  int QueryDistanceParallel(const std::vector<int> &ns, const std::vector<int> &nt, std::vector<int> &ret);
 
   bool LoadIndex(std::ifstream &ifs);
   bool LoadIndex(const char *filename);
@@ -199,12 +199,12 @@ ConstructIndex() {
         index_[v].bpspt_s[i_bpspt][1] = tmp_s[v].second & ~tmp_s[v].first;
       }
       if (!quiet && i_bpspt % (kNumBitParallelRoots / 10) == 0){
-        std::cout << time_neighbor+GetCurrentTimeSec() << " (" << (100 * i_bpspt / kNumBitParallelRoots) << "%) ";
+        std::cout << time_neighbor+GetCurrentTimeSec() << " (" << (100 * i_bpspt / kNumBitParallelRoots) << "%) " << std::flush;
       }
     }
   }
   time_neighbor += GetCurrentTimeSec();
-  if (!quiet) std::cout << "| Search time: " << time_neighbor << ", BPRoot Size: " << kNumBitParallelRoots << std::endl;
+  if (!quiet) std::cout << "| Neighbor time: " << time_neighbor << ", BPRoot Size: " << kNumBitParallelRoots << std::endl;
 
   // Pruned labeling
   time_search = -GetCurrentTimeSec();
@@ -290,8 +290,8 @@ ConstructIndex() {
       }
       usd[r] = true;
 
-      if (!quiet && r % (V / 10) == 0){
-        std::cout << time_search+GetCurrentTimeSec() << " (" << (100 * r / V) << "%) ";
+      if (!quiet && r % (V / 20) == 0){
+        std::cout << time_search+GetCurrentTimeSec() << " (" << (100 * r / V) << "%) " << std::flush;
       }
     }
 
@@ -324,7 +324,6 @@ Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
     const index_t &idx_w = index_[alias[V+i]];
     flag = true;
 
-    // std::cout << "  " << v << " " << alias_inv[bp_root[i]] << " " << int(idx_v.bpspt_d[i]) ;
     for (int j = 0; j < i; ++j) {
       uint8_t td = idx_v.bpspt_d[j] + idx_w.bpspt_d[j];
       if (td - 2 <= idx_v.bpspt_d[i]) {
@@ -333,14 +332,12 @@ Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
             ((idx_v.bpspt_s[j][0] & idx_w.bpspt_s[j][1]) | (idx_v.bpspt_s[j][1] & idx_w.bpspt_s[j][0]))
             ? -1 : 0;
 
-        // std::cout << ", " << alias_inv[bp_root[j]] << " " << int(td);
         if (td <= idx_v.bpspt_d[i]){
           flag = false;
           break;
         }
       }
     }
-    // std::cout << std::endl;
 
     if (flag){
       pos.push_back(V+i);
@@ -376,7 +373,7 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
   dist_que.push(0);
   updated[alias[v]] = true;
 
-  while (!node_que.empty()){
+  while (!node_que.empty() && pos.size() < size_t(4*size*size)){
     uint32_t u = node_que.front();
     uint8_t  d = dist_que.front();
     node_que.pop();
@@ -385,13 +382,27 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
     if (d > d_last && pos.size() >= size_t(size)) break;
     d_last = d;
 
-    for (size_t i = 0; i < adj[u].size(); i++){
-      if (updated[adj[u][i]]) continue;
-      node_que.push(adj[u][i]);
-      dist_que.push(d + 1);
-      pos.push_back(alias_inv[adj[u][i]]);
-      dist.push_back(d + 1);
-      updated[adj[u][i]] = true;
+    if (adj[u].size() > 32){
+      size_t i;
+      for (size_t ii = 0; i < 32; ii++){
+        i = rand() % adj[u].size();
+        if (updated[adj[u][i]]) continue;
+        node_que.push(adj[u][i]);
+        dist_que.push(d + 1);
+        pos.push_back(alias_inv[adj[u][i]]);
+        dist.push_back(d + 1);
+        updated[adj[u][i]] = true;
+      }
+    }
+    else{
+      for (size_t i = 0; i < adj[u].size(); i++){
+        if (updated[adj[u][i]]) continue;
+        node_que.push(adj[u][i]);
+        dist_que.push(d + 1);
+        pos.push_back(alias_inv[adj[u][i]]);
+        dist.push_back(d + 1);
+        updated[adj[u][i]] = true;
+      }
     }
   }
 
@@ -399,7 +410,7 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
 }
 
 int PrunedLandmarkLabeling::
-QueryDistance(const uint32_t v, const uint32_t w) {
+QueryDistance(const int v, const int w) {
   if (v >= V+kNumBitParallelRoots || w >= V+kNumBitParallelRoots) return v == w ? 0 : INT_MAX;
 
   const index_t &idx_v = index_[alias[v]];
@@ -441,16 +452,19 @@ QueryDistance(const uint32_t v, const uint32_t w) {
 }
 
 int PrunedLandmarkLabeling::
-QueryDistanceLoop(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, size_t st, size_t ed, std::vector<int> &ret){
+QueryDistanceLoop(const std::vector<int> &ns, const std::vector<int> &nt, size_t st, size_t ed, std::vector<int> &ret){
   for (size_t i = st; i < ed; i++){
     auto it = ret.begin() + i;
     *it = QueryDistance(ns[i], nt[i]);
+    if (!quiet && st == 0 && i % (ed / 10) == 0){
+      std::cout << i << " (" << (100 * i / ed) << "%) " << std::flush;
+    }
   }
   return (ed - st);
 }
 
 int PrunedLandmarkLabeling::
-QueryDistanceParallel(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, std::vector<int> &ret){
+QueryDistanceParallel(const std::vector<int> &ns, const std::vector<int> &nt, std::vector<int> &ret){
   std::vector<std::thread> threads;
   size_t st, ed = 0;
   size_t it;

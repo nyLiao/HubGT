@@ -61,6 +61,7 @@ def setup_argparse():
     parser.add_argument('--dp_ffn', type=float, default=0.5)
     parser.add_argument('--dp_attn', type=float, default=0.5)
     parser.add_argument('--aggr_output', type=bool, default=False)
+    parser.add_argument('--var_vfeat', type=bool, default=False)
     # Optim configuration
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('-e', '--epoch', type=int, default=200)
