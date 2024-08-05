@@ -92,7 +92,8 @@ def main(args):
         dp_bias=args.dp_bias,
         ffn_dim=args.ffn_dim,
         num_global_node=N_BPROOT,
-        aggr_output=args.aggr_output,
+        var_vfeat=bool(args.var_vfeat),
+        aggr_output=bool(args.aggr_output),
     )
     logger.log(logging.LTRN, str(model))
     model.to(args.device)

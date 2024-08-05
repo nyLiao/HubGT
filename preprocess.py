@@ -96,6 +96,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     # time_index = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
     time_index = py_pll.get_index(
         edge_index, np.flip(id_map), str(args.logpath.parent), args.quiet, args.index)
+    logger.log(logging.LTRN, f'Index time: {time_index:.2f}')
     del edge_index, data.edge_index, deg
     data.edge_index = None
 
@@ -146,7 +147,8 @@ def process_data(args, res_logger=utils.ResLogger()):
     pbar.close()
 
     # ===== Aggregate SPD graph
-    chunk_num = args.num_workers ** max(np.round(np.log10(num_nodes)/3), 1)
+    scale_factor = np.round(np.log10(num_nodes) / 3)
+    chunk_num = args.num_workers ** max(scale_factor, 1)
     id_map = np.array_split(np.random.permutation(num_nodes), chunk_num)
     with Pool(args.num_workers) as pool:
         spd = pool.starmap(aggr_csr, ((ids[id_i], num_nodes+N_BPROOT) for id_i in id_map))
@@ -172,12 +174,13 @@ def process_data(args, res_logger=utils.ResLogger()):
         x_extend = (INF8 - x_extend) / INF8
         x = torch.cat([x, x_extend], dim=1)
         args.num_features = x.size(1)
-    logger.log(logging.LTRN, f'Indexing time: {time_index:.2f}, Neighbor time: {stopwatch_sample}, SPD time: {stopwatch_spd}')
+    logger.log(logging.LTRN, f'Sample time: {stopwatch_sample}, SPD time: {stopwatch_spd}')
 
     # ===== Data loader
     graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd.tocsr(), spd_bias=spd_bias)
     graph.contiguous('x', 'y', 'spd_bias')
     ids = torch.from_numpy(ids).contiguous()
+    scale_factor = 0 if num_nodes < 2e4 else 1
 
     s = ''
     loader = {}
@@ -188,7 +191,7 @@ def process_data(args, res_logger=utils.ResLogger()):
         loader[split] = DataLoader(
             pyg_utils.mask_to_index(mask),
             batch_size=args.batch,
-            num_workers=0,
+            num_workers=4 * scale_factor,
             shuffle=shuffle,
             collate_fn=partial(collate,
                 ids=ids,
