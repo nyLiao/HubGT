@@ -237,6 +237,7 @@ class GT(nn.Module):
         dp_attn,
         ffn_dim,
         num_global_node,
+        num_nodes,
         var_vfeat,
         aggr_output,
     ):
@@ -247,6 +248,7 @@ class GT(nn.Module):
         self.hidden_dim = hidden_dim
         self.var_vfeat = var_vfeat
         self.aggr_output = aggr_output
+        self.num_nodes = num_nodes
         if var_vfeat:
             self.virtual_feat = nn.Parameter(torch.zeros(num_global_node, hidden_dim))
             self.virtual_feat.data.normal_()
@@ -271,8 +273,8 @@ class GT(nn.Module):
         node_feature = self.node_encoder(x)         # [n_graph, n_node, n_hidden]
 
         if self.var_vfeat:
-            gids = ids < 0
-            node_feature[gids] += self.virtual_feat[64+ids[gids]]
+            gids = ids >= self.num_nodes
+            node_feature[gids] += self.virtual_feat[ids[gids] - self.num_nodes]
 
         # transfomrer encoder
         output = self.input_dropout(node_feature)

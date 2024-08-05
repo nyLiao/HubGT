@@ -1,4 +1,7 @@
+import os
+import json
 import logging
+import optuna
 
 import torch
 import torch.nn.functional as F
@@ -91,6 +94,7 @@ def main(args):
         dp_input=args.dp_input,
         dp_bias=args.dp_bias,
         ffn_dim=args.ffn_dim,
+        num_nodes=args.num_nodes,
         num_global_node=N_BPROOT,
         var_vfeat=bool(args.var_vfeat),
         aggr_output=bool(args.aggr_output),
@@ -165,7 +169,34 @@ def main(args):
 
 if __name__ == "__main__":
     parser = utils.setup_argparse()
+    parser.add_argument('--seed_tune', type=int, default=None, help='Load seed')
     args = utils.setup_args(parser)
+
+    if args.seed_tune is not None:
+        study_path = '-'.join(filter(None, ['optuna', args.suffix])) + '.db'
+        study_path, _ = utils.setup_logpath(folder_args=(study_path,))
+        if os.path.exists(study_path.joinpath('config.json')):
+            with open(study_path.joinpath('config.json'), 'r') as config_file:
+                best_params = json.load(config_file)
+        else:
+            logpath, logid = utils.setup_logpath(
+                folder_args=(args.data, f'{args.seed_tune}-param'),
+                quiet=True)
+            study = optuna.create_study(
+                study_name=logid,
+                storage=f'sqlite:///{str(study_path)}',
+                direction='maximize',
+                sampler=optuna.samplers.TPESampler(),
+                pruner=optuna.pruners.HyperbandPruner(
+                    min_resource=2,
+                    max_resource=args.epoch,
+                    reduction_factor=3),
+                load_if_exists=True)
+            best_params = {k: v for k, v in study.best_params.items()}
+            utils.save_args(logpath, best_params)
+
+        for k, v in best_params.items():
+            setattr(args, k, v)
 
     seed_lst = args.seed.copy()
     for seed in seed_lst:

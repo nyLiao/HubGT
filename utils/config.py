@@ -60,8 +60,8 @@ def setup_argparse():
     parser.add_argument('--dp_bias', type=float, default=0.1)
     parser.add_argument('--dp_ffn', type=float, default=0.5)
     parser.add_argument('--dp_attn', type=float, default=0.5)
-    parser.add_argument('--aggr_output', type=bool, default=False)
-    parser.add_argument('--var_vfeat', type=bool, default=False)
+    parser.add_argument('--aggr_output', type=int, default=0)       # bool
+    parser.add_argument('--var_vfeat', type=int, default=0)         # bool
     # Optim configuration
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('-e', '--epoch', type=int, default=200)
@@ -75,6 +75,7 @@ def setup_argparse():
     parser.add_argument('--multi', action='store_true', help='True for multi-label classification')
     parser.add_argument('--num_workers', type=int, default=16, help='number of loader workers')
     parser.add_argument('--perturb_std', type=float, default=0.0, help='perturb for training data')
+    parser.add_argument('--pre_collate', type=int, default=0)       # bool
     # Precompute configuration
     parser.add_argument('--kindex', type=int, default=8, help='top-K PLL indexing')
     parser.add_argument('--kbias', type=int, default=1, help='top-K SPD for bias')

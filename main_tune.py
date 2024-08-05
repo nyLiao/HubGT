@@ -56,6 +56,7 @@ def objective(trial, args, logger, res_logger):
         dp_input=args.dp_input,
         dp_bias=args.dp_bias,
         ffn_dim=args.ffn_dim,
+        num_nodes=args.num_nodes,
         num_global_node=N_BPROOT,
         var_vfeat=bool(args.var_vfeat),
         aggr_output=bool(args.aggr_output),
@@ -145,7 +146,7 @@ def main(args):
         direction='maximize',
         sampler=optuna.samplers.TPESampler(),
         pruner=optuna.pruners.HyperbandPruner(
-            min_resource=3,
+            min_resource=2,
             max_resource=args.epoch,
             reduction_factor=3),
         load_if_exists=True)
