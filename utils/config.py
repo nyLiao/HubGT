@@ -75,12 +75,12 @@ def setup_argparse():
     parser.add_argument('--multi', action='store_true', help='True for multi-label classification')
     parser.add_argument('--num_workers', type=int, default=16, help='number of loader workers')
     parser.add_argument('--perturb_std', type=float, default=0.0, help='perturb for training data')
-    parser.add_argument('--pre_collate', type=int, default=0)       # bool
+    parser.add_argument('--pre_collate', type=int, default=1)       # bool
     # Precompute configuration
     parser.add_argument('--kindex', type=int, default=8, help='top-K PLL indexing')
     parser.add_argument('--kbias', type=int, default=1, help='top-K SPD for bias')
     parser.add_argument('--kfeat', type=int, default=0, help='top-K SPD for feature')
-    parser.add_argument('-ns', type=int, default=8, help='num of subgraphs')
+    parser.add_argument('-ns', type=int, default=6, help='num of subgraphs')
     parser.add_argument('-ss', type=int, default=32, help='total num of nodes in each subgraph')
     parser.add_argument('-s0', type=int, default=12, help='max num of label nodes in each subgraph')
     parser.add_argument('-s0g', type=int, default=4)

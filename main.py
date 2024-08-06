@@ -49,17 +49,23 @@ def eval(args, model, device, loader, evaluator):
     for batch in loader:
         batch = batch.to(device)
         with stopwatch:
-            output = model(batch).view(-1, args.ns, args.num_classes)
+            output = model(batch)
             label  = batch.y.view(-1, args.ns)[:, 0]
 
-        # Average output logits on subgraph dim based on majority predicted class
-        pred = output.argmax(dim=2)  # [batch, ns]
-        mask = torch.mode(pred, dim=1).values
-        mask = torch.where(pred == mask[:, None], 1, 0)
-        output = torch.sum(output * mask[:, :, None], dim=1) / mask.sum(dim=1)[:, None]
         if args.num_classes == 1:
-            label = label.unsqueeze(1).float()
-        evaluator(output.view(-1, args.num_classes), label)
+            output = F.sigmoid(output.squeeze(-1).view(-1, args.ns))
+            pred = (output > 0.5).long()
+            mask = torch.mode(pred, dim=1).values
+            mask = torch.where(pred == mask[:, None], 1, 0)
+            output = torch.sum(output * mask, dim=1) / mask.sum(dim=1)
+        else:
+            # Average output logits on subgraph dim based on majority predicted class
+            output = F.log_softmax(output, dim=1).view(-1, args.ns, args.num_classes)
+            pred = output.argmax(dim=2)  # [batch, ns]
+            mask = torch.mode(pred, dim=1).values
+            mask = torch.where(pred == mask[:, None], 1, 0)
+            output = torch.sum(output * mask[:, :, None], dim=1) / mask.sum(dim=1)[:, None]
+        evaluator(output, label)
 
     res = ResLogger()
     res.concat(evaluator.compute())

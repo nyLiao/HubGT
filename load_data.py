@@ -162,10 +162,11 @@ class SingleGraphLoader(object):
                 name=self.data,
                 transform=self.transform,)
             self.split_idx = self.seed
-            if self.data in ['genius', 'twitch-gamer']:
-                self.metric = 's_auroc'
-            else:
-                self.metric = 's_f1i'
+            # if self.data in ['genius', 'twitch-gamer']:
+            #     self.metric = 's_auroc'
+            # else:
+            #     self.metric = 's_f1i'
+            self.metric = 's_f1i'
             if self.data not in ['snap-patents']:
                 kwargs['transform'] = self._T_insert(T.ToUndirected(), index=0)
         elif self.data in ['penn94', 'amherst41', 'cornell5', 'johns_hopkins55', 'reed98']:

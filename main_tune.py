@@ -25,7 +25,7 @@ def objective(trial, args, logger, res_logger):
     # args.aggr_output = trial.suggest_int('aggr_output', 0, 1)
     # args.var_vfeat = trial.suggest_int('var_vfeat', 0, 1)
     # args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
-    args.ns = trial.suggest_int('ns', 2, 10, step=2)
+    args.ns = trial.suggest_int('ns', 2, 8, step=2)
     args.s0 = trial.suggest_int('s0', 0, 16, step=2)
     args.s0g = trial.suggest_int('s0g', 0, 8, step=2)
     args.s1 = trial.suggest_int('s1', 0, 8, step=2)
