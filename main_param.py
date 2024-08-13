@@ -78,8 +78,17 @@ def eval(args, model, device, loader, evaluator):
 def main(args):
     # ========== Run configuration
     logger = utils.setup_logger(args.logpath, level_console=args.loglevel, quiet=args.quiet)
-    res_logger = ResLogger(quiet=args.quiet, suffix=args.suffix)
-    res_logger.concat([('seed', args.seed),])
+    res_logger = ResLogger(quiet=False, suffix=args.suffix)
+    res_logger.concat([('seed', args.seed), ('param', getattr(args, args.suffix))])
+    for k in ["s0", "s0g", "s1"]:
+        setattr(args, k, round(getattr(args, k) * args.ss / 32.))
+    if args.suffix == 's0':
+        args.s0g = args.s0 // 3
+        args.s1 = 31 - args.s0 - args.s0g
+    if args.suffix == 's1':
+        args.s0g = (32 - args.s1) // 4
+        args.s0 = 31 - args.s1 - args.s0g
+    print(f' > {args.suffix}: {getattr(args, args.suffix)}')
 
     # ========== Load data
     loader = process_data(args, res_logger)
@@ -113,7 +122,7 @@ def main(args):
             weight_decay=args.weight_decay)
     scheduler = PolynomialDecayLR(
             optimizer,
-            warmup=max(args.epoch // 10, 50),
+            warmup=args.epoch // 10,
             tot=args.epoch,
             lr=args.peak_lr,
             end_lr=args.end_lr,
@@ -168,7 +177,6 @@ def main(args):
     logger.info(f"[args]: {args}")
     logger.log(logging.LRES, f"[res]: {res_logger}")
     res_logger.save()
-    utils.save_args(args.logpath, vars(args))
     utils.clear_logger(logger)
     return res_logger.data.loc[0, args.metric+'_val']
 
@@ -209,7 +217,7 @@ if __name__ == "__main__":
         args.seed = utils.setup_seed(seed, args.cuda)
         args.flag = '-'.join(filter(None, [str(args.seed), args.suffix]))
         args.logpath, args.logid = utils.setup_logpath(
-            folder_args=(args.data, args.flag),
+            folder_args=(args.data, "param", args.flag),
             quiet=args.quiet)
 
         main(args)

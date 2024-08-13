@@ -84,7 +84,7 @@ def setup_argparse():
     parser.add_argument('-ss', type=int, default=32, help='total num of nodes in each subgraph')
     parser.add_argument('-s0', type=int, default=12, help='max num of label nodes in each subgraph')
     parser.add_argument('-s0g', type=int, default=4)
-    parser.add_argument('-s1', type=int, default=5, help='max num of rev label nodes in each subgraph')
+    parser.add_argument('-s1', type=int, default=6, help='max num of rev label nodes in each subgraph')
     parser.add_argument('-r0', type=float, default=-1.0, help='norm for label distance')
     parser.add_argument('-r1', type=float, default=-1.0, help='norm for neighbor distance')
     return parser

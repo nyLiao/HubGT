@@ -10,6 +10,7 @@ data/
 dataset/
 cache/
 figs/
+fig_*.ipynb
 
 # User specific
 try*
