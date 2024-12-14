@@ -54,6 +54,8 @@ private:
   static const uint8_t INF8;  // For unreachable pairs
   static const int kNumBitParallelRoots = 128;
   static const int NUMTHREAD = 16;
+  static const int MAXIDX = 32;   // max label size
+  static const int MAXDIST = 16;  // max search distance
 
   // 4 * 33 * BP + 40 * |L|
   struct index_t {
@@ -145,11 +147,11 @@ ConstructIndex() {
           que[que_h++] = v;
           tmp_d[v] = 1;
           tmp_s[v].first = 1ULL << nns;
-          if (++nns == 64) break;
+          if (++nns == MAXIDX) break;
         }
       }
 
-      for (uint8_t d = 0; que_t0 < que_h && d < 16; ++d) {
+      for (uint8_t d = 0; que_t0 < que_h && d < MAXDIST; ++d) {
         size_t num_sibling_es = 0, num_child_es = 0;
 
         for (int que_i = que_t0; que_i < que_t1; ++que_i) {
@@ -232,7 +234,7 @@ ConstructIndex() {
       vis[r] = true;
       que_t1 = que_h;
 
-      for (uint8_t d = 0; que_t0 < que_h && d < 16; ++d) {
+      for (uint8_t d = 0; que_t0 < que_h && d < MAXDIST; ++d) {
         for (int que_i = que_t0; que_i < que_t1; ++que_i) {
           uint32_t v = que[que_i];
           std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
@@ -271,7 +273,7 @@ ConstructIndex() {
           tmp_idx_v.second.push_back(INF8);
           for (size_t i = 0; i < adj[v].size(); ++i) {
             uint32_t w = adj[v][i];
-            if (!vis[w]) {
+            if (!vis[w] && tmp_idx[w].first.size() < MAXIDX) {
               que[que_h++] = w;
               vis[w] = true;
             }
@@ -320,7 +322,7 @@ Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
   bool flag;
 
   for (int i = 0; i < kNumBitParallelRoots; ++i){
-    if (idx_v.bpspt_d[i] > 16 || idx_v.bpspt_d[i] == 0) continue;
+    if (idx_v.bpspt_d[i] > MAXDIST || idx_v.bpspt_d[i] == 0) continue;
     const index_t &idx_w = index_[alias[V+i]];
     flag = true;
 
