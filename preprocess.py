@@ -140,7 +140,7 @@ def process_data(args, res_logger=utils.ResLogger()):
         nodes0g, val0g, s0g_actual = py_pll.glabel(ego)
         s0g = min(args.s0g, s0g_actual)
         if s0g > 0:
-            ziplst.append((nodes0g, val0g, args.r0, s0g))
+            ziplst.append((nodes0g, val0g, args.r0g, s0g))
 
         s1_actual = len(n1_lst[ego])
         if s1_actual > 0:

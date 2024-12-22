@@ -319,31 +319,15 @@ Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
   pos.clear();
   dist.clear();
   const index_t &idx_v = index_[alias[v]];
-  bool flag;
+  uint8_t d = INF8;
 
   for (int i = 0; i < kNumBitParallelRoots; ++i){
-    if (idx_v.bpspt_d[i] > MAXDIST || idx_v.bpspt_d[i] == 0) continue;
-    const index_t &idx_w = index_[alias[V+i]];
-    flag = true;
-
-    for (int j = 0; j < i; ++j) {
-      uint8_t td = idx_v.bpspt_d[j] + idx_w.bpspt_d[j];
-      if (td - 2 <= idx_v.bpspt_d[i]) {
-        td +=
-            (idx_v.bpspt_s[j][0] & idx_w.bpspt_s[j][0]) ? -2 :
-            ((idx_v.bpspt_s[j][0] & idx_w.bpspt_s[j][1]) | (idx_v.bpspt_s[j][1] & idx_w.bpspt_s[j][0]))
-            ? -1 : 0;
-
-        if (td <= idx_v.bpspt_d[i]){
-          flag = false;
-          break;
-        }
-      }
-    }
-
-    if (flag){
-      pos.push_back(V+i);
-      dist.push_back(idx_v.bpspt_d[i]);
+    if (idx_v.bpspt_d[i] > MAXDIST/4) continue;
+    uint8_t td = idx_v.bpspt_d[i];
+    if (td <= d) {
+      d = td;
+      pos.push_back(alias_inv[alias[V+i]]);
+      dist.push_back(d);
     }
   }
   return pos.size();
@@ -384,9 +368,9 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
     if (d > d_last && pos.size() >= size_t(size)) break;
     d_last = d;
 
-    if (adj[u].size() > 32){
+    if (adj[u].size() > MAXIDX){
       size_t i;
-      for (size_t ii = 0; i < 32; ii++){
+      for (size_t ii = 0; i < MAXIDX; ii++){
         i = rand() % adj[u].size();
         if (updated[adj[u][i]]) continue;
         node_que.push(adj[u][i]);
@@ -435,6 +419,7 @@ QueryDistance(const int v, const int w) {
       if (td < d) d = td;
     }
   }
+
   for (uint32_t i1 = 0, i2 = 0; ; ) {
     uint32_t v1 = idx_v.spt_v[i1], v2 = idx_w.spt_v[i2];
     if (v1 == v2) {
