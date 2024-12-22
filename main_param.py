@@ -189,7 +189,7 @@ if __name__ == "__main__":
     if args.seed_tune is not None:
         study_path, _ = utils.setup_logpath(folder_args=('optuna.db',))
         logpath, logid = utils.setup_logpath(
-            folder_args=(args.data, f'{args.seed_tune}-param'),
+            folder_args=(args.data, f'param'),
             quiet=True)
         if os.path.exists(logpath.joinpath('config.json')):
             with open(logpath.joinpath('config.json'), 'r') as config_file:
@@ -198,9 +198,17 @@ if __name__ == "__main__":
             print(f"Saving to {logpath}.")
             study = optuna.create_study(
                 study_name=logid,
-                storage=f'sqlite:///{str(study_path)}',
+                storage=optuna.storages.RDBStorage(
+                    url=f'sqlite:///{str(study_path)}',
+                    heartbeat_interval=3600),
                 direction='maximize',
-                sampler=optuna.samplers.TPESampler(),
+                sampler=optuna.samplers.TPESampler(
+                    n_startup_trials=8,
+                    n_ei_candidates=36,
+                    seed=args.seed_tune,
+                    multivariate=True,
+                    group=True,
+                    warn_independent_sampling=False),
                 pruner=optuna.pruners.HyperbandPruner(
                     min_resource=2,
                     max_resource=args.epoch,

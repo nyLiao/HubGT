@@ -25,12 +25,13 @@ def objective(trial, args, logger, res_logger):
     # args.aggr_output = trial.suggest_int('aggr_output', 0, 1)
     # args.var_vfeat = trial.suggest_int('var_vfeat', 0, 1)
     # args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
-    args.ns = trial.suggest_int('ns', 2, 8, step=2)
-    args.s0 = trial.suggest_int('s0', 0, 16, step=2)
-    args.s0g = trial.suggest_int('s0g', 0, 8, step=2)
-    args.s1 = trial.suggest_int('s1', 0, 8, step=2)
-    args.r0 = trial.suggest_float('r0', -5.0, 5.0, step=0.2)
-    args.r1 = trial.suggest_float('r1', -5.0, 5.0, step=0.2)
+    # args.ns = trial.suggest_int('ns', 2, 8, step=2)
+    args.s0 = trial.suggest_int('s0', 0, 36, step=2)
+    args.s0g = trial.suggest_int('s0g', 0, 12, step=2)
+    args.s1 = trial.suggest_int('s1', 0, 12, step=2)
+    args.r0 = trial.suggest_float('r0', -4.0, 2.0, step=0.2)
+    args.r0 = trial.suggest_float('r0g', -4.0, 2.0, step=0.2)
+    args.r1 = trial.suggest_float('r1', -4.0, 2.0, step=0.2)
     for k in trial.params:
         res_logger.concat([(k, trial.params[k])])
     logger.log(logging.LTRN, trial.params)
@@ -142,9 +143,17 @@ def main(args):
     study_path, _ = utils.setup_logpath(folder_args=(study_path,))
     study = optuna.create_study(
         study_name=args.logid,
-        storage=f'sqlite:///{str(study_path)}',
+        storage=optuna.storages.RDBStorage(
+            url=f'sqlite:///{str(study_path)}',
+            heartbeat_interval=3600),
         direction='maximize',
-        sampler=optuna.samplers.TPESampler(),
+        sampler=optuna.samplers.TPESampler(
+            n_startup_trials=min(8, args.n_trials // 5),
+            n_ei_candidates=24,
+            seed=args.seed_tune,
+            multivariate=True,
+            group=True,
+            warn_independent_sampling=False),
         pruner=optuna.pruners.HyperbandPruner(
             min_resource=2,
             max_resource=args.epoch,
@@ -170,7 +179,7 @@ if __name__ == "__main__":
     seed_lst = args.seed.copy()
     for seed in seed_lst:
         args.seed = utils.setup_seed(seed, args.cuda)
-        args.flag = f'{args.seed}-param'
+        args.flag = f'param'
         args.logpath, args.logid = utils.setup_logpath(
             folder_args=(args.data, args.flag),
             quiet=args.quiet)
