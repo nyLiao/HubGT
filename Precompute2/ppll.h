@@ -326,6 +326,8 @@ Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
     uint8_t td = idx_v.bpspt_d[i];
     if (td <= d) {
       d = td;
+      if ((d == 0) && (alias[V+i] == v)) break;
+      if (d == 0) d++;
       pos.push_back(alias_inv[alias[V+i]]);
       dist.push_back(d);
     }

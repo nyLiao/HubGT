@@ -126,6 +126,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     fn_callback = partial(callback_sample, ids, pbar)
     n1_lst = {e: [] for e in range(num_nodes)}
     pool = Pool(args.num_workers)
+    # Descending internal id (smaller degree first)
     for ego in id_map:
         stopwatch_sample.start()
         # ===== Generate SPD neighborhood

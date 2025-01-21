@@ -14,7 +14,7 @@ from torch_geometric.data import Data, Dataset
 import torch_geometric.transforms as T
 from torch_geometric.data.dataset import _get_flattened_data_list
 
-from dataset_process import GenNorm, load_import, idx2mask, split_random, get_iso_nodes_mapping
+from dataset_process import RemoveSelfLoops, load_import, idx2mask, split_random, get_iso_nodes_mapping
 from dataset_process.linkx import T_arxiv_year, T_ogbn_mag
 
 
@@ -48,6 +48,7 @@ class SingleGraphLoader(object):
             T.RemoveDuplicatedEdges(reduce='mean'),
             # T.LargestConnectedComponents(),
             # T.AddRemainingSelfLoops(fill_value=1.0),
+            RemoveSelfLoops(),
             T.NormalizeFeatures(),
             # T.ToSparseTensor(remove_edge_index=False, layout=torch.sparse_csr),
         ])

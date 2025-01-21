@@ -14,8 +14,5 @@ ARGS_S=(
 # appendix: cora, citeseer, pubmed, cs, physic, chameleon_filter, squirrel_filter
 DATAS=("physics")
 for data in ${DATAS[@]}; do
-    python main.py --data $data "${ARGS_S[@]}" "--aggr_output" "0" "--var_vfeat" "0" "--suffix" "a0v0"
-    python main.py --data $data "${ARGS_S[@]}" "--aggr_output" "1" "--var_vfeat" "0" "--suffix" "a1v0"
-    python main.py --data $data "${ARGS_S[@]}" "--aggr_output" "0" "--var_vfeat" "1" "--suffix" "a0v1"
-    # python main.py --data $data "${ARGS_S[@]}" "--aggr_output" "1" "--var_vfeat" "1" "--suffix" "a1v1"
+    python main.py --data $data "${ARGS_S[@]}"
 done

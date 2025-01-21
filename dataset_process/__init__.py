@@ -1,6 +1,6 @@
 from .yandex import Yandex
 from .linkx import LINKX, FB100
-from .gen_norm import GenNorm
+from .gen_norm import GenNorm, RemoveSelfLoops
 
 from .utils import (
     load_import,
