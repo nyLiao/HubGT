@@ -41,6 +41,9 @@ cdef class PyPLL:
     def store_index(self, str filename):
         return self.c_pll.StoreIndex(filename.encode('utf-8'))
 
+    def k_distance(self, int ns, int nt):
+        return self.c_pll.QueryDistance(ns, nt)
+
     def k_distance_parallel(self, np.ndarray[int, ndim=1] ns, np.ndarray[int, ndim=1] nt):
         cdef vector[int] result
         result = np.empty_like(ns, dtype=np.int32)
