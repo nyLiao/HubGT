@@ -30,6 +30,7 @@ public:
   int Label(const int v, std::vector<int> &pos, std::vector<int> &dist);
   int SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist);
 
+  inline int QueryDistanceTwo(const int v, const std::vector<int> &nw, std::vector<int> &ret);
   inline int QueryDistance(const int v, const int w);
   int QueryDistanceLoop(const std::vector<int> &ns, const std::vector<int> &nt, size_t st, size_t ed, std::vector<int> &ret);
   int QueryDistanceParallel(const std::vector<int> &ns, const std::vector<int> &nt, std::vector<int> &ret);
@@ -107,7 +108,7 @@ ConstructGraph(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt,
 
 float PrunedLandmarkLabeling::
 ConstructIndex() {
-  double time_neighbor, time_search;
+  double time_neighbor, time_search, time_two;
   if (!quiet) std::cout << "Building index -- Nodes: " << V << ", Edges: " << E << std::endl;
 
   // Bit-parallel labeling
@@ -210,7 +211,6 @@ ConstructIndex() {
   if (!quiet) std::cout << "| Neighbor time: " << time_neighbor << ", BPRoot Size: " << LEN_BP << std::endl;
 
   // Pruned labeling
-  time_search = -GetCurrentTimeSec();
   {
     // Sentinel (V, INF8) is added to all the vertices
     std::vector<std::pair<std::vector<uint32_t>, std::vector<uint8_t> > >
@@ -222,8 +222,11 @@ ConstructIndex() {
 
     std::vector<bool> vis(V);
     std::vector<uint32_t> que(V);
+    std::vector<uint32_t> que_two(V);
     std::vector<uint8_t> dst_r(V + 1, INF8);
+    std::vector<size_t> tmp_len_inv(V);
 
+    time_search = -GetCurrentTimeSec();
     for (size_t r = 0; r < V; ++r) {
       if (usd[r]) continue;
       const index_t &idx_r = index_[r];
@@ -235,10 +238,9 @@ ConstructIndex() {
         dst_r[tmp_idx_r.first[i]] = tmp_idx_r.second[i];
       }
 
-      int que_t0 = 0, que_t1 = 0, que_h = 0;
-      que[que_h++] = r;
+      int que_t0 = 0, que_t1 = 1, que_h = 1;
+      que[0] = r;
       vis[r] = true;
-      que_t1 = que_h;
 
       for (uint8_t d = 0; que_t0 < que_h && d < MAXDIST; ++d) {
         for (int que_i = que_t0; que_i < que_t1; ++que_i) {
@@ -277,13 +279,16 @@ ConstructIndex() {
           tmp_idx_v.second.back() = d;
           tmp_idx_v.first .push_back(V);
           tmp_idx_v.second.push_back(INF8);
-          tmp_inv_r.first .push_back(v);
-          tmp_inv_r.second.push_back(d);
+          if (d > 0) {
+            tmp_inv_r.first .push_back(v);
+            tmp_inv_r.second.push_back(d);
+          }
           for (size_t i = 0; i < adj[v].size(); ++i) {
             const uint32_t w = adj[v][i];
             if (!vis[w] && tmp_idx[w].first.size() < MAXIDX) {
-              que[que_h++] = w;
               vis[w] = true;
+              if (usd[w]) continue;
+              que[que_h++] = w;
             }
           }
         pruned:
@@ -299,24 +304,70 @@ ConstructIndex() {
         dst_r[tmp_idx_r.first[i]] = INF8;
       }
       usd[r] = true;
+      tmp_len_inv[r] = tmp_inv_r.first.size();
 
       if (!quiet && r % (V / 20) == 0){
         std::cout << time_search+GetCurrentTimeSec() << " (" << (100 * r / V) << "%) " << std::flush;
       }
     }
+    time_search += GetCurrentTimeSec();
+
+    time_two = -GetCurrentTimeSec();
+    for (size_t r = 0; r < V; ++r) {
+      const std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
+          &tmp_idx_r = tmp_idx[r];
+      std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
+          &tmp_inv_r = tmp_inv[r];
+
+      // 2-hop neighbors
+      int que_two_h = -1;
+
+      for (size_t i = 0; ; ++i) {
+        const uint32_t v = tmp_idx_r.first[i];
+        if (v >= r) break;
+        const uint8_t d_rv = tmp_idx_r.second[i];
+        const std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
+            &tmp_inv_v = tmp_inv[v];
+
+        _mm_prefetch(&tmp_inv_v.first[0], _MM_HINT_T0);
+        _mm_prefetch(&tmp_inv_v.second[0], _MM_HINT_T0);
+
+        for (size_t j = 0; j < tmp_len_inv[v]; ++j) {
+          const uint32_t w = tmp_inv_v.first[j];
+          if (w >= r) continue;
+
+          const uint8_t td = d_rv + tmp_inv_v.second[j];
+          if (td < dst_r[w]) {
+            dst_r[w] = td;
+            que_two[++que_two_h] = w;
+          }
+        }
+      }
+
+      for ( ; que_two_h >= 0; --que_two_h) {
+        const uint32_t w = que_two[que_two_h];
+        if (dst_r[w] == INF8) continue;
+        tmp_inv_r.first .push_back(w);
+        tmp_inv_r.second.push_back(dst_r[w]);
+        dst_r[w] = INF8;
+      }
+    }
+    time_two += GetCurrentTimeSec();
 
     for (size_t v = 0; v < V; ++v) {
-      index_[v].len_spt = tmp_idx[v].first.size();
-      index_[v].len_inv = tmp_inv[v].first.size();
-      const size_t &len_spt = index_[v].len_spt;
-      const size_t &acc_inv = len_spt + index_[v].len_inv;
+      const size_t sz_idx = tmp_idx[v].first.size();
+      const size_t sz_inv = tmp_inv[v].first.size();
+      index_[v].len_spt = sz_idx;
+      index_[v].len_inv = tmp_len_inv[v];
+      index_[v].len_two = sz_inv - tmp_len_inv[v];
 
-      index_[v].spt_v = (uint32_t*)memalign(64, acc_inv * sizeof(uint32_t));
-      index_[v].spt_d = (uint8_t *)memalign(64, acc_inv * sizeof(uint8_t ));
-      for (size_t i = 0; i < len_spt; ++i) index_[v].spt_v[i] = tmp_idx[v].first[i];
-      for (size_t i = 0; i < len_spt; ++i) index_[v].spt_d[i] = tmp_idx[v].second[i];
-      for (size_t i = len_spt; i < acc_inv; ++i) index_[v].spt_v[i] = tmp_inv[v].first[i];
-      for (size_t i = len_spt; i < acc_inv; ++i) index_[v].spt_d[i] = tmp_inv[v].second[i];
+      const size_t sz_all = sz_idx + sz_inv;
+      index_[v].spt_v = (uint32_t*)memalign(64, sz_all * sizeof(uint32_t));
+      index_[v].spt_d = (uint8_t *)memalign(64, sz_all * sizeof(uint8_t ));
+      for (size_t i = 0; i < sz_idx; ++i) index_[v].spt_v[i] = tmp_idx[v].first[i];
+      for (size_t i = 0; i < sz_idx; ++i) index_[v].spt_d[i] = tmp_idx[v].second[i];
+      for (size_t i = 0; i < sz_inv; ++i)  index_[v].spt_v[sz_idx+i] = tmp_inv[v].first[i];
+      for (size_t i = 0; i < sz_inv; ++i)  index_[v].spt_d[sz_idx+i] = tmp_inv[v].second[i];
 
       tmp_idx[v].first.clear();
       tmp_idx[v].second.clear();
@@ -324,10 +375,41 @@ ConstructIndex() {
       tmp_inv[v].second.clear();
     }
   }
-  time_search += GetCurrentTimeSec();
 
-  if (!quiet) std::cout << "| Search time: " << time_search << ", Avg Label Size: " << AverageLabelSize() << std::endl;
-  return time_neighbor + time_search;
+  const std::vector<int> tmp_nt = {0, 629, 632, 639, 692};
+  for (size_t v = 0; v < V; ++v) {
+    const size_t sz_idx = index_[v].len_spt;
+    const size_t sz_inv = index_[v].len_inv + index_[v].len_two;
+    const size_t sz_all = sz_idx + sz_inv;
+
+    // if (v % 1000 == 0) {
+    if (index_[v].len_two > 3) {
+      std::cout << v << "(" << index_[v].len_spt << "," << index_[v].len_inv << "," << index_[v].len_two << "): ";
+      for (size_t i = sz_idx; i < sz_idx+index_[v].len_inv; ++i) {
+        std::cout << index_[v].spt_v[i] << "/" << (int)index_[v].spt_d[i] << " ";
+      }
+      std::cout << "; ";
+      for (size_t i = sz_idx+index_[v].len_inv; i < sz_all; ++i) {
+        std::cout << index_[v].spt_v[i] << "/" << (int)index_[v].spt_d[i] << " ";
+      }
+      std::cout << std::endl;
+
+      std::vector<int> ret(5);
+      QueryDistanceTwo(v, tmp_nt, ret);
+      for (size_t i = 0; i < tmp_nt.size(); ++i) {
+        std::cout << ret[i] << " ";
+      }
+      std::cout << std::endl;
+      for (size_t i = 0; i < tmp_nt.size(); ++i) {
+        std::cout << QueryDistance(v, tmp_nt[i]) << " ";
+      }
+      std::cout << std::endl;
+    }
+  }
+
+  if (!quiet) std::cout << "| Search time: " << time_search << ", Two-hop time: " << time_two
+    << ", Avg Label Size: " << AverageLabelSize() << std::endl;
+  return time_neighbor + time_search + time_two;
 }
 
 // ====================
@@ -414,12 +496,62 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
   return pos.size();
 }
 
+// ====================
+int PrunedLandmarkLabeling::
+QueryDistanceTwo(const int v, const std::vector<int> &nw, std::vector<int> &ret) {
+  // TODO: unordered_map
+  const index_t &idx_v = index_[v];
+  const size_t len_v = idx_v.len_spt + idx_v.len_inv + idx_v.len_two;
+  const uint64_t *bps_v = idx_v.bpspt_s[0];
+  const uint8_t  *bpd_v = idx_v.bpspt_d;
+  _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
+  _mm_prefetch(&idx_v.spt_d[0], _MM_HINT_T0);
+  _mm_prefetch(&bps_v[0], _MM_HINT_T0);
+  _mm_prefetch(&bpd_v[0], _MM_HINT_T0);
+
+  for (size_t j = 0; j < nw.size(); ++j) {
+    if (nw[j] >= v) {
+      ret[j] = 0;
+      continue;
+    }
+
+    for (size_t i = 0; ; ++i) {
+      if (i == len_v) {
+        const index_t &idx_w = index_[nw[j]];
+        uint8_t d = INF8;
+        for (int i = 0; i < LEN_BP; ++i) {
+          uint8_t td = idx_v.bpspt_d[i] + idx_w.bpspt_d[i];
+          if (td - 2 <= d) {
+            td +=
+                (idx_v.bpspt_s[i][0] & idx_w.bpspt_s[i][0]) ? -2 :
+                ((idx_v.bpspt_s[i][0] & idx_w.bpspt_s[i][1]) | (idx_v.bpspt_s[i][1] & idx_w.bpspt_s[i][0]))
+                ? -1 : 0;
+
+            if (td < d) d = td;
+          }
+        }
+
+        ret[j] = d;
+        break;
+      }
+      if (idx_v.spt_v[i] == nw[j]) {
+        ret[j] = idx_v.spt_d[i];
+        break;
+      }
+    }
+  }
+
+  return len_v;
+}
+
 int PrunedLandmarkLabeling::
 QueryDistance(const int v, const int w) {
   if (v >= V+LEN_BP || w >= V+LEN_BP) return v == w ? 0 : INT_MAX;
 
-  const index_t &idx_v = index_[alias[v]];
-  const index_t &idx_w = index_[alias[w]];
+  // const index_t &idx_v = index_[alias[v]];
+  // const index_t &idx_w = index_[alias[w]];
+  const index_t &idx_v = index_[v];
+  const index_t &idx_w = index_[w];
   uint8_t d = INF8;
 
   _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
@@ -453,7 +585,7 @@ QueryDistance(const int v, const int w) {
     }
   }
 
-  if (d >= INF8 - 2) d = 255;
+  if (d >= INF8 - 2) d = 127;
   return d;
 }
 
@@ -626,7 +758,7 @@ double PrunedLandmarkLabeling::
 AverageLabelSize() {
   double s = 0.0;
   for (size_t v = 0; v < V; ++v) {
-    s += index_[v].len_spt;
+    s += index_[v].len_spt + index_[v].len_inv + index_[v].len_two;
   }
   return s / V;
 }

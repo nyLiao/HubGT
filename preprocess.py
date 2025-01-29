@@ -18,6 +18,9 @@ from utils.collator import INF8, collate, collate_sim
 from Precompute2 import PyPLL
 
 N_BPROOT = 128
+np.set_printoptions(linewidth=160, edgeitems=50, threshold=20,
+                    formatter=dict(float=lambda x: "% 9.3e" % x))
+torch.set_printoptions(linewidth=160, edgeitems=50)
 
 
 def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
