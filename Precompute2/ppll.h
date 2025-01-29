@@ -16,19 +16,23 @@
 #include <stack>
 #include <queue>
 #include <set>
+#include <unordered_set>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <utility>
+#include <numeric>
 
 
 class PrunedLandmarkLabeling {
 public:
   void ConstructGraph(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, const std::vector<uint32_t> &alias_inv);
   float ConstructIndex();
-  int Global(const int v, std::vector<int> &pos, std::vector<int> &dist);
-  int Label(const int v, std::vector<int> &pos, std::vector<int> &dist);
-  int SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist);
+  int FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const int n_adj, std::vector<int> &pos, std::vector<int> &dist);
+  inline int Global(const int v, std::vector<int> &pos, std::vector<int> &dist);
+  inline int Label(const int v, std::vector<int> &pos, std::vector<int> &dist);
+  inline int InvLabel(const int v, std::vector<int> &pos, std::vector<int> &dist);
+  inline int SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist);
 
   inline int QueryDistanceTwo(const int v, const std::vector<int> &nw, std::vector<int> &ret);
   inline int QueryDistance(const int v, const int w);
@@ -75,6 +79,7 @@ private:
 
   inline void Init();
   void Free();
+  inline int SampleSet(const int size, const std::vector<int> &set, const std::vector<int> &set2, std::vector<int> &ret, std::vector<int> &ret2);
 
   double GetCurrentTimeSec() {
     struct timeval tv;
@@ -376,37 +381,6 @@ ConstructIndex() {
     }
   }
 
-  const std::vector<int> tmp_nt = {0, 629, 632, 639, 692};
-  for (size_t v = 0; v < V; ++v) {
-    const size_t sz_idx = index_[v].len_spt;
-    const size_t sz_inv = index_[v].len_inv + index_[v].len_two;
-    const size_t sz_all = sz_idx + sz_inv;
-
-    // if (v % 1000 == 0) {
-    if (index_[v].len_two > 3) {
-      std::cout << v << "(" << index_[v].len_spt << "," << index_[v].len_inv << "," << index_[v].len_two << "): ";
-      for (size_t i = sz_idx; i < sz_idx+index_[v].len_inv; ++i) {
-        std::cout << index_[v].spt_v[i] << "/" << (int)index_[v].spt_d[i] << " ";
-      }
-      std::cout << "; ";
-      for (size_t i = sz_idx+index_[v].len_inv; i < sz_all; ++i) {
-        std::cout << index_[v].spt_v[i] << "/" << (int)index_[v].spt_d[i] << " ";
-      }
-      std::cout << std::endl;
-
-      std::vector<int> ret(5);
-      QueryDistanceTwo(v, tmp_nt, ret);
-      for (size_t i = 0; i < tmp_nt.size(); ++i) {
-        std::cout << ret[i] << " ";
-      }
-      std::cout << std::endl;
-      for (size_t i = 0; i < tmp_nt.size(); ++i) {
-        std::cout << QueryDistance(v, tmp_nt[i]) << " ";
-      }
-      std::cout << std::endl;
-    }
-  }
-
   if (!quiet) std::cout << "| Search time: " << time_search << ", Two-hop time: " << time_two
     << ", Avg Label Size: " << AverageLabelSize() << std::endl;
   return time_neighbor + time_search + time_two;
@@ -414,10 +388,95 @@ ConstructIndex() {
 
 // ====================
 int PrunedLandmarkLabeling::
+FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const int n_adj,
+          std::vector<int> &pos, std::vector<int> &dist){
+  const uint32_t vv = alias[v];
+  const index_t &idx_v = index_[vv];
+  size_t n_total = 1 + n_bp + n_spt + n_inv + n_adj;
+  size_t s_bp, s_spt, s_inv, s_adj, sn_adj, s_total;
+  pos.reserve(n_total);
+  dist.reserve(n_total * n_total);
+  std::vector<int> tmp_pos(LEN_BP), tmp_dist(LEN_BP);
+
+  // Construct sample
+  pos.push_back(vv);
+  dist.push_back(0);
+  Global(vv, tmp_pos, tmp_dist);
+  s_bp = SampleSet(n_bp, tmp_pos, tmp_dist, pos, dist);
+  Label(vv, tmp_pos, tmp_dist);
+  s_spt = SampleSet(n_spt, tmp_pos, tmp_dist, pos, dist);
+  InvLabel(vv, tmp_pos, tmp_dist);
+  s_inv = SampleSet(n_inv, tmp_pos, tmp_dist, pos, dist);
+  s_total = s_bp + s_spt + s_inv;
+  sn_adj = n_total - s_total - 1;
+  SNeighbor(vv, sn_adj, tmp_pos, tmp_dist);
+  s_adj = SampleSet(sn_adj, tmp_pos, tmp_dist, pos, dist);
+  s_total += s_adj + 1;
+
+  // Query pair-wise distance
+  std::vector<int> argpos(s_total);
+  std::iota(argpos.begin(), argpos.end(), 0);
+  std::sort(argpos.begin(), argpos.end(), [&pos](int a, int b) {
+    return pos[a] > pos[b];
+  });
+
+  dist.resize(s_total * s_total);
+  for (size_t i = 0; i < s_total; ++i) {
+    tmp_pos.clear();
+    tmp_dist.clear();
+    for (size_t j = i+1; j < s_total; ++j) {
+      tmp_pos.push_back(pos[argpos[j]]);
+    }
+    QueryDistanceTwo(pos[argpos[i]], tmp_pos, tmp_dist);
+    dist[argpos[i]*s_total + argpos[i]] = 0;
+    for (size_t j = i+1; j < s_total; ++j) {
+      dist[argpos[i]*s_total + argpos[j]] = tmp_dist[j-i-1];
+      dist[argpos[j]*s_total + argpos[i]] = tmp_dist[j-i-1];
+    }
+  }
+
+  // Align to output
+  if (s_total < n_total) {
+    std::vector<std::vector<int>> tile(s_total, std::vector<int>(n_total, 0));
+
+    for (size_t i = 0; i < s_total; ++i) {
+      std::copy(dist.begin() + i * s_total, dist.begin() + (i+1) * s_total, tile[i].begin());
+    }
+    while (pos.size() < n_total) {
+      size_t remaining = n_total - pos.size();
+      size_t copy_size = std::min(s_total, remaining);
+      pos.insert(pos.end(), pos.begin(), pos.begin() + copy_size);
+      for (size_t i = 0; i < copy_size; ++i) {
+        dist.insert(dist.end(), tile[i].begin(), tile[i].begin() + copy_size);
+      }
+    }
+    pos.resize(n_total);
+
+    dist.clear();
+    dist.reserve(n_total * n_total);
+    for (size_t i = 0; i < s_total; ++i) {
+      dist.insert(dist.end(), tile[i].begin(), tile[i].end());
+    }
+    while (dist.size() < n_total * n_total) {
+      size_t remaining = n_total * n_total - dist.size();
+      size_t copy_size = std::min(s_total * n_total, remaining);
+      dist.insert(dist.end(), dist.begin(), dist.begin() + copy_size);
+    }
+    dist.resize(n_total * n_total);
+  }
+  for (size_t i = 0; i < n_total; ++i) {
+    pos[i] = alias_inv[pos[i]];
+  }
+  return s_total;
+}
+
+int PrunedLandmarkLabeling::
 Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
   pos.clear();
   dist.clear();
-  const index_t &idx_v = index_[alias[v]];
+  const index_t &idx_v = index_[v];
+  _mm_prefetch(&idx_v.bpspt_d[0], _MM_HINT_T0);
+  _mm_prefetch(&idx_v.bpspt_s[0][0], _MM_HINT_T0);
   uint8_t d = INF8;
 
   for (int i = 0; i < LEN_BP; ++i){
@@ -425,9 +484,9 @@ Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
     uint8_t td = idx_v.bpspt_d[i];
     if (td <= d) {
       d = td;
-      if ((d == 0) && (alias[V+i] == v)) break;
+      if ((d == 0) && (V+i == v)) break;
       if (d == 0) d++;
-      pos.push_back(alias_inv[alias[V+i]]);
+      pos.push_back(alias[V+i]);
       dist.push_back(d);
     }
   }
@@ -438,11 +497,30 @@ int PrunedLandmarkLabeling::
 Label(const int v, std::vector<int> &pos, std::vector<int> &dist){
   pos.clear();
   dist.clear();
-  const index_t &idx_v = index_[alias[v]];
+  const index_t &idx_v = index_[v];
+  _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
+  _mm_prefetch(&idx_v.spt_d[0], _MM_HINT_T0);
 
   for (size_t i = 0; idx_v.spt_v[i] != V; ++i){
     if (idx_v.spt_d[i] == 0) continue;
-    pos.push_back(alias_inv[idx_v.spt_v[i]]);
+    pos.push_back(idx_v.spt_v[i]);
+    dist.push_back(idx_v.spt_d[i]);
+  }
+  return pos.size();
+}
+
+int PrunedLandmarkLabeling::
+InvLabel(const int v, std::vector<int> &pos, std::vector<int> &dist){
+  pos.clear();
+  dist.clear();
+  const index_t &idx_v = index_[v];
+  const size_t acc_spt = idx_v.len_spt, acc_inv = idx_v.len_spt + idx_v.len_inv;
+  _mm_prefetch(&idx_v.spt_v[acc_spt], _MM_HINT_T0);
+  _mm_prefetch(&idx_v.spt_d[acc_spt], _MM_HINT_T0);
+
+  for (size_t i = acc_spt; i < acc_inv; ++i){
+    if (idx_v.spt_d[i] == 0) continue;
+    pos.push_back(idx_v.spt_v[i]);
     dist.push_back(idx_v.spt_d[i]);
   }
   return pos.size();
@@ -456,9 +534,9 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
   std::queue<uint32_t> node_que, dist_que;
   std::vector<bool> updated(V, false);
   int d_last = 0;
-  node_que.push(alias[v]);
+  node_que.push(v);
   dist_que.push(0);
-  updated[alias[v]] = true;
+  updated[v] = true;
 
   while (!node_que.empty() && pos.size() < size_t(4*size*size)){
     uint32_t u = node_que.front();
@@ -476,7 +554,7 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
         if (updated[adj[u][i]]) continue;
         node_que.push(adj[u][i]);
         dist_que.push(d + 1);
-        pos.push_back(alias_inv[adj[u][i]]);
+        pos.push_back(adj[u][i]);
         dist.push_back(d + 1);
         updated[adj[u][i]] = true;
       }
@@ -486,7 +564,7 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
         if (updated[adj[u][i]]) continue;
         node_que.push(adj[u][i]);
         dist_que.push(d + 1);
-        pos.push_back(alias_inv[adj[u][i]]);
+        pos.push_back(adj[u][i]);
         dist.push_back(d + 1);
         updated[adj[u][i]] = true;
       }
@@ -494,6 +572,30 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
   }
 
   return pos.size();
+}
+
+int PrunedLandmarkLabeling::
+SampleSet(const int size, const std::vector<int> &set, const std::vector<int> &set2, std::vector<int> &ret, std::vector<int> &ret2) {
+  if (set.size() <= size) {
+    for (size_t i = 0; i < set.size(); ++i) {
+      ret.push_back(set[i]);
+      ret2.push_back(set2[i]);
+    }
+    return set.size();
+  }
+
+  std::vector<bool> usd(set.size(), false);
+  int cnt = 0;
+  while (cnt < size) {
+    int index = rand() % set.size();
+    if (!usd[index]) {
+      usd[index] = true;
+      ret.push_back(set[index]);
+      ret2.push_back(set2[index]);
+      cnt++;
+    }
+  }
+  return size;
 }
 
 // ====================
@@ -548,8 +650,6 @@ int PrunedLandmarkLabeling::
 QueryDistance(const int v, const int w) {
   if (v >= V+LEN_BP || w >= V+LEN_BP) return v == w ? 0 : INT_MAX;
 
-  // const index_t &idx_v = index_[alias[v]];
-  // const index_t &idx_w = index_[alias[w]];
   const index_t &idx_v = index_[v];
   const index_t &idx_w = index_[w];
   uint8_t d = INF8;

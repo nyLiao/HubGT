@@ -56,6 +56,12 @@ cdef class PyPLL:
         self.c_pll.QueryDistanceParallel(ns, nt, result)
         return result
 
+    def fetch_node(self, int v, int n_bp, int n_spt, int n_inv, int n_adj):
+        cdef vector[int] nodes
+        cdef vector[int] dist
+        length = self.c_pll.FetchNode(v, n_bp, n_spt, n_inv, n_adj, nodes, dist)
+        return nodes, dist, length
+
     def glabel(self, int v):
         cdef vector[int] nodes
         cdef vector[int] dist
