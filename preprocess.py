@@ -14,7 +14,7 @@ import torch_geometric.utils as pyg_utils
 
 from load_data import SingleGraphLoader
 import utils
-from utils.collator import INF8, collate, collate_sim
+from utils.collator import INF8, collate_fetch
 from Precompute2 import PyPLL
 
 N_BPROOT = 128
@@ -75,25 +75,6 @@ def aggr_csr(ids_chunk, num_nodes):
     return spd
 
 
-spd = None
-spd_bias = None
-def collate_pre(ids):
-    batch_size, ns, s_total = ids.shape
-    kbias = spd_bias.shape[1]
-    n_seq = batch_size * ns
-    attn_bias = np.empty((n_seq, s_total, s_total, kbias), dtype=np.int16)
-    for g, subnodes in enumerate(ids.reshape(n_seq, -1)):
-        spd_g = spd[subnodes][:, subnodes].toarray()
-        spd_g = spd_g + spd_g.T
-        # Mask invalid distance
-        attn_bias_g = spd_bias[spd_g]
-        mask = ~np.eye(spd_g.shape[0], dtype=bool).reshape(spd_g.shape[0], spd_g.shape[0], 1).repeat(kbias, axis=2)
-        mask = mask & (attn_bias_g <= 0)
-        attn_bias_g[mask] = INF8
-        attn_bias[g] = attn_bias_g
-    return attn_bias
-
-
 def process_data(args, res_logger=utils.ResLogger()):
     logger = logging.getLogger('log')
     data_loader = SingleGraphLoader(args)
@@ -123,105 +104,17 @@ def process_data(args, res_logger=utils.ResLogger()):
     del edge_index, data.edge_index, deg
     data.edge_index = None
 
-    stopwatch_sample, stopwatch_spd = utils.Stopwatch(), utils.Stopwatch()
-    ids = np.zeros((num_nodes, args.ns, args.ss), dtype=int)
-    pbar = tqdm(total=num_nodes, disable=args.quiet, desc='Sample')
-    fn_callback = partial(callback_sample, ids, pbar)
-    n1_lst = {e: [] for e in range(num_nodes)}
-    pool = Pool(args.num_workers)
-    # Descending internal id (smaller degree first)
-    for ego in id_map:
-        stopwatch_sample.start()
-        # ===== Generate SPD neighborhood
-        # TODO: fix directed API
-        nodes0, val0, s0_actual = py_pll.label(ego)
-        if args.s1 > 0:
-            for node, val in zip(nodes0, val0):
-                n1_lst[node].append((ego, val))
-        s0 = min(args.s0, s0_actual)
-        ziplst = [(nodes0, val0, args.r0, s0)] if s0 > 0 else []
-
-        nodes0g, val0g, s0g_actual = py_pll.glabel(ego)
-        s0g = min(args.s0g, s0g_actual)
-        if s0g > 0:
-            ziplst.append((nodes0g, val0g, args.r0g, s0g))
-
-        s1_actual = len(n1_lst[ego])
-        if s1_actual > 0:
-            nodes1, val1 = zip(*n1_lst[ego])
-            nodes1 = list(nodes1)
-            s1_actual = min(args.s1, len(nodes1))
-            ziplst.append((nodes1, val1, args.r0, s1_actual))
-        s1 = s1_actual
-        del n1_lst[ego]
-
-        s2 = args.ss - s0 - s0g - s1 - 1
-        s2_actual = 0
-        if s2 > 0:
-            nodes2, val2, s2_actual = py_pll.s_neighbor(ego, s2)
-            s2_actual = min(s2_actual, s2)
-            ziplst.append((nodes2, val2, args.r1, s2_actual))
-        s2 = s2_actual
-
-        kwargs = {'ns': args.ns, 'ss': args.ss}
-        pool.apply_async(aggr_sample, (ego, ziplst), kwargs, callback=fn_callback)
-        stopwatch_sample.pause()
-    pool.close()
-    pool.join()
-    pbar.close()
-
-    # ===== Aggregate SPD graph
-    global spd
-    global spd_bias
-    scale_factor = np.round(np.log10(num_nodes) / 3)
-    chunk_num = args.num_workers ** max(scale_factor, 1)
-    id_map = np.array_split(np.random.permutation(num_nodes), chunk_num)
-    with Pool(args.num_workers) as pool:
-        spd = pool.starmap(aggr_csr, ((ids[id_i], num_nodes+N_BPROOT) for id_i in id_map))
-    spd = sum(spd)
-
-    spd = spd.tocoo(copy=False)
-    spd.data = np.arange(spd.nnz, dtype=int)
-    with stopwatch_spd:
-        spd_bias = py_pll.k_distance_parallel(spd.row, spd.col)
-        # spd_bias = py_pll.k_distance_parallel(rows, cols, args.kfeat)
-    spd_bias = np.array(spd_bias, dtype=np.int16).reshape(-1, args.kbias)
-    logger.log(logging.LTRN, f'SPD size: {spd.nnz}, feat size: {x.size(1)}, max deg: {deg_max}')
-    spd = spd.tocsr(copy=False)
-    gc.collect()
-
     # ===== Extend features
     y = torch.cat([y, -torch.ones(N_BPROOT, dtype=y.dtype)])
     x = torch.cat([x, torch.zeros(N_BPROOT, x.size(1), dtype=x.dtype)], dim=0)
-    if args.kfeat > 0:
-        rows = cols = np.arange(x.size(0), dtype=np.uint32)
-        with stopwatch_spd:
-            x_extend = py_pll.k_distance_parallel(rows, cols, args.kfeat)
-        x_extend = torch.tensor(x_extend, dtype=torch.float32).view(-1, args.kfeat)
-        x_extend = (INF8 - x_extend) / INF8
-        x = torch.cat([x, x_extend], dim=1)
-        args.num_features = x.size(1)
-    logger.log(logging.LTRN, f'Sample time: {stopwatch_sample}, SPD time: {stopwatch_spd}')
 
     # ===== Data loader
     s = ''
     loader = {}
-    if args.pre_collate:
-        id_map = np.array_split(np.arange(num_nodes), chunk_num)
-        with Pool(args.num_workers) as pool:
-            attn_bias = pool.starmap(collate_pre, ((ids[id_i],) for id_i in id_map))
-        attn_bias = np.vstack(attn_bias)
-        attn_bias = torch.from_numpy(attn_bias).view(-1, args.ns, args.ss, args.ss, args.kbias)
-        graph = Data(x=x, y=y, num_nodes=num_nodes, attn_bias=attn_bias)
-        graph.contiguous('x', 'y', 'attn_bias')
-        collate_fn = collate_sim
-        del spd, spd_bias
-    else:
-        graph = Data(x=x, y=y, num_nodes=num_nodes, spd=spd, spd_bias=spd_bias)
-        graph.contiguous('x', 'y', 'spd_bias')
-        collate_fn = collate
+    graph = Data(x=x, y=y, num_nodes=num_nodes)
+    graph.contiguous('x', 'y')
+    s_adj = args.ss - args.s0 - args.s0g - args.s1 - 1
 
-    ids = torch.from_numpy(ids).contiguous()
     for split in ['train', 'val', 'test']:
         mask = getattr(data, f'{split}_mask')
         shuffle = {'train': True, 'val': False, 'test': False}[split]
@@ -231,9 +124,10 @@ def process_data(args, res_logger=utils.ResLogger()):
             batch_size=args.batch,
             num_workers=(0 if num_nodes < 5e4 else 4),
             shuffle=shuffle,
-            collate_fn=partial(collate_fn,
-                ids=ids,
+            collate_fn=partial(collate_fetch,
+                c_handler=py_pll,
                 graph=graph,
+                n_bp=args.s0g, n_spt=args.s0, n_inv=args.s1, n_adj=s_adj,
                 std=std,
         ))
         s += f'{split}: {mask.sum().item()}, '
@@ -242,7 +136,7 @@ def process_data(args, res_logger=utils.ResLogger()):
 
     res_logger.concat([
         ('time_index', time_index),
-        ('time_pre', time_index + stopwatch_sample.data + stopwatch_spd.data),
+        ('time_pre', time_index),
         ('mem_ram_pre', utils.MemoryRAM()(unit='G')),
         ('mem_cuda_pre', utils.MemoryCUDA()(unit='G')),
     ])

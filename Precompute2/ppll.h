@@ -227,7 +227,7 @@ ConstructIndex() {
 
     std::vector<bool> vis(V);
     std::vector<uint32_t> que(V);
-    std::vector<uint32_t> que_two(V);
+    std::queue<uint32_t> que_two;
     std::vector<uint8_t> dst_r(V + 1, INF8);
     std::vector<size_t> tmp_len_inv(V);
 
@@ -325,8 +325,6 @@ ConstructIndex() {
           &tmp_inv_r = tmp_inv[r];
 
       // 2-hop neighbors
-      int que_two_h = -1;
-
       for (size_t i = 0; ; ++i) {
         const uint32_t v = tmp_idx_r.first[i];
         if (v >= r) break;
@@ -344,17 +342,22 @@ ConstructIndex() {
           const uint8_t td = d_rv + tmp_inv_v.second[j];
           if (td < dst_r[w]) {
             dst_r[w] = td;
-            que_two[++que_two_h] = w;
+            que_two.push(w);
           }
         }
       }
 
-      for ( ; que_two_h >= 0; --que_two_h) {
-        const uint32_t w = que_two[que_two_h];
-        if (dst_r[w] == INF8) continue;
+      while (!que_two.empty()) {
+        uint32_t w = que_two.front();
+        que_two.pop();
+        if (dst_r[w] >= MAXDIST) continue;
         tmp_inv_r.first .push_back(w);
         tmp_inv_r.second.push_back(dst_r[w]);
         dst_r[w] = INF8;
+      }
+
+      if (!quiet && r % (V / 20) == 0){
+        std::cout << time_two+GetCurrentTimeSec() << " (" << (100 * r / V) << "%) " << std::flush;
       }
     }
     time_two += GetCurrentTimeSec();

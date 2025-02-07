@@ -66,3 +66,24 @@ def collate_sim(idx, ids, graph, std=0.0):
         x += torch.normal(0, std * norm, x.shape, device=x.device, dtype=x.dtype)
 
     return Batch(attn_bias, x, y, ids)
+
+
+def collate_fetch(idx, c_handler, graph, n_bp, n_spt, n_inv, n_adj, std=0.0):
+    idx = torch.stack(idx, dim=0).flatten() # avoid slice and copy for ids
+    batch_size = idx.size(0)
+    s_total = n_bp + n_spt + n_inv + n_adj + 1
+
+    ids = torch.zeros((batch_size, s_total), dtype=int)
+    attn_bias = torch.zeros((batch_size, s_total * s_total), dtype=int)
+    for ir, r in enumerate(idx):
+        pos, dist, _ = c_handler.fetch_node(r, n_bp, n_spt, n_inv, n_adj)
+        ids[ir], attn_bias[ir] = torch.tensor(pos, dtype=int), torch.tensor(dist, dtype=int)
+    attn_bias = attn_bias.view(batch_size, s_total, s_total, 1)
+
+    y = graph.y[ids[:, 0].view(-1)].view(-1)
+    x = graph.x[ids.view(-1)].view(batch_size, s_total, -1)
+    if std > 0:
+        norm = torch.norm(x)
+        x += torch.normal(0, std * norm, x.shape, device=x.device, dtype=x.dtype)
+
+    return Batch(attn_bias, x, y, ids)
