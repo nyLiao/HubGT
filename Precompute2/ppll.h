@@ -17,11 +17,13 @@
 #include <queue>
 #include <set>
 #include <unordered_set>
+#include <unordered_map>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <utility>
 #include <numeric>
+#include <assert.h>
 
 using std::vector;
 using std::pair;
@@ -113,7 +115,7 @@ ConstructGraph(const vector<uint32_t> &ns, const vector<uint32_t> &nt, const vec
   for (size_t i = 0; i < V; i++) alias[alias_inv[i]] = i;
 
   for (size_t i = 0; i < E; i++){
-    adj[alias[ns[i]]].push_back(alias[nt[i]]);
+    adj[alias[ns[i]]].emplace_back(alias[nt[i]]);
   }
 }
 
@@ -283,11 +285,11 @@ ConstructIndex() {
           // Traverse
           tmp_idx_v.first .back() = r;
           tmp_idx_v.second.back() = d;
-          tmp_idx_v.first .push_back(V);
-          tmp_idx_v.second.push_back(INF8);
+          tmp_idx_v.first .emplace_back(V);
+          tmp_idx_v.second.emplace_back(INF8);
           if (d > 0) {
-            tmp_inv_r.first .push_back(v);
-            tmp_inv_r.second.push_back(d);
+            tmp_inv_r.first .emplace_back(v);
+            tmp_inv_r.second.emplace_back(d);
           }
           for (size_t i = 0; i < adj[v].size(); ++i) {
             const uint32_t w = adj[v][i];
@@ -349,8 +351,8 @@ ConstructIndex() {
         uint32_t w = que_two.front();
         que_two.pop();
         if (dst_r[w] >= MAXDIST) continue;
-        tmp_inv_r.first .push_back(w);
-        tmp_inv_r.second.push_back(dst_r[w]);
+        tmp_inv_r.first .emplace_back(w);
+        tmp_inv_r.second.emplace_back(dst_r[w]);
         dst_r[w] = INF8;
       }
 
@@ -396,22 +398,23 @@ FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const i
   size_t n_total = 1 + n_bp + n_spt + n_inv + n_adj;
   size_t s_bp, s_spt, s_inv, s_adj, sn_adj, s_total;
   pos.reserve(n_total);
-  dist.reserve(n_total * n_total);
   vector<int> tmp_pos(LEN_BP), tmp_dist(LEN_BP);
+  vector<vector<int>> mat(n_total, vector<int>{});
+  vector<int> &mat0 = mat[0];
 
   // Construct sample
-  pos.push_back(vv);
-  dist.push_back(0);
+  pos.emplace_back(vv);
+  mat0.emplace_back(0);
   Global(vv, tmp_pos, tmp_dist);
-  s_bp = SampleSet(n_bp, tmp_pos, tmp_dist, pos, dist);
+  s_bp = SampleSet(n_bp, tmp_pos, tmp_dist, pos, mat0);
   Label(vv, tmp_pos, tmp_dist);
-  s_spt = SampleSet(n_spt, tmp_pos, tmp_dist, pos, dist);
+  s_spt = SampleSet(n_spt, tmp_pos, tmp_dist, pos, mat0);
   InvLabel(vv, tmp_pos, tmp_dist);
-  s_inv = SampleSet(n_inv, tmp_pos, tmp_dist, pos, dist);
+  s_inv = SampleSet(n_inv, tmp_pos, tmp_dist, pos, mat0);
   s_total = s_bp + s_spt + s_inv;
   sn_adj = n_total - s_total - 1;
   SNeighbor(vv, sn_adj, tmp_pos, tmp_dist);
-  s_adj = SampleSet(sn_adj, tmp_pos, tmp_dist, pos, dist);
+  s_adj = SampleSet(sn_adj, tmp_pos, tmp_dist, pos, mat0);
   s_total += s_adj + 1;
 
   // Query pair-wise distance: pos (len s) -> dist (s * s)
@@ -421,54 +424,53 @@ FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const i
     return pos[a] > pos[b];
   });
 
-  dist.resize(s_total * s_total);
-  for (size_t i = 0; i < s_total; ++i) {
-    tmp_pos.clear();
+  tmp_pos.clear();
+  tmp_pos.emplace_back(pos[argpos[s_total-1]]);
+  for (size_t j = 1; j < s_total; ++j) {
+    mat[j].resize(s_total);
+    mat[j][0] = mat0[j];
+  }
+
+  for (int i = s_total-2; i >= 0; --i) {
+    if (pos[argpos[i]] == vv) {
+      tmp_pos.emplace_back(pos[argpos[i]]);
+      continue;
+    }
     tmp_dist.clear();
-    for (size_t j = i+1; j < s_total; ++j) {
-      tmp_pos.push_back(pos[argpos[j]]);
-    }
     QueryDistanceTwo(pos[argpos[i]], tmp_pos, tmp_dist);
-    dist[argpos[i]*s_total + argpos[i]] = 0;
-    for (size_t j = i+1; j < s_total; ++j) {
-      dist[argpos[i]*s_total + argpos[j]] = tmp_dist[j-i-1];
-      dist[argpos[j]*s_total + argpos[i]] = tmp_dist[j-i-1];
+    // mat[argpos[i]][argpos[i]] = 0;
+    for (int j = s_total-1; j > i; --j) {
+      mat[argpos[i]][argpos[j]] = tmp_dist[s_total-1 - j];
+      mat[argpos[j]][argpos[i]] = tmp_dist[s_total-1 - j];
     }
+    tmp_pos.emplace_back(pos[argpos[i]]);
+  }
+  for (size_t i = 0; i < s_total; ++i) {
+    pos[i] = alias_inv[pos[i]];
   }
 
   // Align to output
-  if (s_total < n_total) {
-    // pos and tile[i]: s -> n
-    vector<vector<int>> tile(s_total, vector<int>(n_total, 0));
+  // pos and mat[i]: s -> n
+  while (pos.size() < n_total) {
+    const size_t copy_size = std::min(s_total, n_total - pos.size());
+    pos.insert(pos.end(), pos.begin(), pos.begin() + copy_size);
     for (size_t i = 0; i < s_total; ++i) {
-      std::copy(dist.begin() + i * s_total, dist.begin() + (i+1) * s_total, tile[i].begin());
+      mat[i].insert(mat[i].end(), mat[i].begin(), mat[i].begin() + copy_size);
     }
-    while (pos.size() < n_total) {
-      size_t remaining = n_total - pos.size();
-      size_t copy_size = std::min(s_total, remaining);
-      pos.insert(pos.end(), pos.begin(), pos.begin() + copy_size);
-      for (size_t i = 0; i < copy_size; ++i) {
-        dist.insert(dist.end(), tile[i].begin(), tile[i].begin() + copy_size);
-      }
-    }
-    pos.resize(n_total);
+  }
 
-    // dist (n * n)
-    dist.clear();
-    dist.reserve(n_total * n_total);
-    for (size_t i = 0; i < s_total; ++i) {
-      dist.insert(dist.end(), tile[i].begin(), tile[i].end());
-    }
-    while (dist.size() < n_total * n_total) {
-      size_t remaining = n_total * n_total - dist.size();
-      size_t copy_size = std::min(s_total * n_total, remaining);
-      dist.insert(dist.end(), dist.begin(), dist.begin() + copy_size);
-    }
-    dist.resize(n_total * n_total);
+  // dist: s*n -> n*n
+  dist.clear();
+  dist.reserve(n_total * n_total);
+  for (size_t i = 0; i < s_total; ++i) {
+    dist.insert(dist.end(), std::make_move_iterator(mat[i].begin()),
+                            std::make_move_iterator(mat[i].end()));
   }
-  for (size_t i = 0; i < n_total; ++i) {
-    pos[i] = alias_inv[pos[i]];
+  while (dist.size() < n_total * n_total) {
+    const size_t copy_size = std::min(s_total * n_total, n_total * n_total - dist.size());
+    dist.insert(dist.end(), dist.begin(), dist.begin() + copy_size);
   }
+
   return s_total;
 }
 
@@ -488,8 +490,8 @@ Global(const int v, vector<int> &pos, vector<int> &dist){
       d = td;
       if ((d == 0) && (V+i == v)) break;
       if (d == 0) d++;
-      pos.push_back(alias[V+i]);
-      dist.push_back(d);
+      pos.emplace_back(alias[V+i]);
+      dist.emplace_back(d);
     }
   }
   return pos.size();
@@ -505,8 +507,8 @@ Label(const int v, vector<int> &pos, vector<int> &dist){
 
   for (size_t i = 0; idx_v.spt_v[i] != V; ++i){
     if (idx_v.spt_d[i] == 0) continue;
-    pos.push_back(idx_v.spt_v[i]);
-    dist.push_back(idx_v.spt_d[i]);
+    pos.emplace_back(idx_v.spt_v[i]);
+    dist.emplace_back(idx_v.spt_d[i]);
   }
   return pos.size();
 }
@@ -522,8 +524,8 @@ InvLabel(const int v, vector<int> &pos, vector<int> &dist){
 
   for (size_t i = acc_spt; i < acc_inv; ++i){
     if (idx_v.spt_d[i] == 0) continue;
-    pos.push_back(idx_v.spt_v[i]);
-    dist.push_back(idx_v.spt_d[i]);
+    pos.emplace_back(idx_v.spt_v[i]);
+    dist.emplace_back(idx_v.spt_d[i]);
   }
   return pos.size();
 }
@@ -534,11 +536,11 @@ SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist){
   dist.clear();
 
   queue<uint32_t> node_que, dist_que;
-  vector<bool> updated(V, false);
+  vector<bool> vis(V, false);
   int d_last = 0;
   node_que.push(v);
   dist_que.push(0);
-  updated[v] = true;
+  vis[v] = true;
 
   while (!node_que.empty() && pos.size() < size_t(4*size*size)){
     uint32_t u = node_que.front();
@@ -553,22 +555,22 @@ SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist){
       size_t i;
       for (size_t ii = 0; i < MAXIDX; ii++){
         i = rand() % adj[u].size();
-        if (updated[adj[u][i]]) continue;
+        if (vis[adj[u][i]]) continue;
         node_que.push(adj[u][i]);
         dist_que.push(d + 1);
-        pos.push_back(adj[u][i]);
-        dist.push_back(d + 1);
-        updated[adj[u][i]] = true;
+        pos.emplace_back(adj[u][i]);
+        dist.emplace_back(d + 1);
+        vis[adj[u][i]] = true;
       }
     }
     else{
       for (size_t i = 0; i < adj[u].size(); i++){
-        if (updated[adj[u][i]]) continue;
+        if (vis[adj[u][i]]) continue;
         node_que.push(adj[u][i]);
         dist_que.push(d + 1);
-        pos.push_back(adj[u][i]);
-        dist.push_back(d + 1);
-        updated[adj[u][i]] = true;
+        pos.emplace_back(adj[u][i]);
+        dist.emplace_back(d + 1);
+        vis[adj[u][i]] = true;
       }
     }
   }
@@ -579,10 +581,10 @@ SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist){
 int PrunedLandmarkLabeling::
 SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vector<int> &ret, vector<int> &ret2) {
   if (set.size() <= size) {
-    for (size_t i = 0; i < set.size(); ++i) {
-      ret.push_back(set[i]);
-      ret2.push_back(set2[i]);
-    }
+    ret.insert (ret.end(),  std::make_move_iterator(set.begin()),
+                            std::make_move_iterator(set.end()));
+    ret2.insert(ret2.end(), std::make_move_iterator(set2.begin()),
+                            std::make_move_iterator(set2.end()));
     return set.size();
   }
 
@@ -592,8 +594,8 @@ SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vecto
     int index = rand() % set.size();
     if (!usd[index]) {
       usd[index] = true;
-      ret.push_back(set[index]);
-      ret2.push_back(set2[index]);
+      ret.emplace_back(set[index]);
+      ret2.emplace_back(set2[index]);
       cnt++;
     }
   }

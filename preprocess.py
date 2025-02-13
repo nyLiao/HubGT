@@ -151,4 +151,6 @@ if __name__ == '__main__':
         quiet=args.quiet)
     np.random.seed(args.seed[0])
     logger = utils.setup_logger(level_file=30, quiet=args.quiet)
-    process_data(args)
+
+    loader = process_data(args)
+    next(iter(loader['val']))
