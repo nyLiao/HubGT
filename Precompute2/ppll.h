@@ -23,21 +23,27 @@
 #include <utility>
 #include <numeric>
 
+using std::vector;
+using std::pair;
+using std::queue;
+using std::unordered_map;
+using std::cout;
+using std::endl;
 
 class PrunedLandmarkLabeling {
 public:
-  void ConstructGraph(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, const std::vector<uint32_t> &alias_inv);
+  void ConstructGraph(const vector<uint32_t> &ns, const vector<uint32_t> &nt, const vector<uint32_t> &alias_inv);
   float ConstructIndex();
-  int FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const int n_adj, std::vector<int> &pos, std::vector<int> &dist);
-  inline int Global(const int v, std::vector<int> &pos, std::vector<int> &dist);
-  inline int Label(const int v, std::vector<int> &pos, std::vector<int> &dist);
-  inline int InvLabel(const int v, std::vector<int> &pos, std::vector<int> &dist);
-  inline int SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist);
+  int FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const int n_adj, vector<int> &pos, vector<int> &dist);
+  inline int Global(const int v, vector<int> &pos, vector<int> &dist);
+  inline int Label(const int v, vector<int> &pos, vector<int> &dist);
+  inline int InvLabel(const int v, vector<int> &pos, vector<int> &dist);
+  inline int SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist);
 
-  inline int QueryDistanceTwo(const int v, const std::vector<int> &nw, std::vector<int> &ret);
+  inline int QueryDistanceTwo(const int v, const vector<int> &nw, vector<int> &ret);
   inline int QueryDistance(const int v, const int w);
-  int QueryDistanceLoop(const std::vector<int> &ns, const std::vector<int> &nt, size_t st, size_t ed, std::vector<int> &ret);
-  int QueryDistanceParallel(const std::vector<int> &ns, const std::vector<int> &nt, std::vector<int> &ret);
+  int QueryDistanceLoop(const vector<int> &ns, const vector<int> &nt, size_t st, size_t ed, vector<int> &ret);
+  int QueryDistanceParallel(const vector<int> &ns, const vector<int> &nt, vector<int> &ret);
 
   bool LoadIndex(std::ifstream &ifs);
   bool LoadIndex(const char *filename);
@@ -74,12 +80,12 @@ private:
   size_t V, E;
   bool quiet = false;
   index_t *index_;
-  std::vector<std::vector<uint32_t> > adj;
-  std::vector<uint32_t> alias, alias_inv;
+  vector<vector<uint32_t> > adj;
+  vector<uint32_t> alias, alias_inv;
 
   inline void Init();
   void Free();
-  inline int SampleSet(const int size, const std::vector<int> &set, const std::vector<int> &set2, std::vector<int> &ret, std::vector<int> &ret2);
+  inline int SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vector<int> &ret, vector<int> &ret2);
 
   double GetCurrentTimeSec() {
     struct timeval tv;
@@ -93,7 +99,7 @@ const uint8_t PrunedLandmarkLabeling::INF8 = std::numeric_limits<uint8_t>::max()
 
 // ====================
 void PrunedLandmarkLabeling::
-ConstructGraph(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt, const std::vector<uint32_t> &alias_inv_) {
+ConstructGraph(const vector<uint32_t> &ns, const vector<uint32_t> &nt, const vector<uint32_t> &alias_inv_) {
   // Prepare the adjacency list and index space
   Free();
   this->V = 0;
@@ -114,18 +120,18 @@ ConstructGraph(const std::vector<uint32_t> &ns, const std::vector<uint32_t> &nt,
 float PrunedLandmarkLabeling::
 ConstructIndex() {
   double time_neighbor, time_search, time_two;
-  if (!quiet) std::cout << "Building index -- Nodes: " << V << ", Edges: " << E << std::endl;
+  if (!quiet) cout << "Building index -- Nodes: " << V << ", Edges: " << E << endl;
 
   // Bit-parallel labeling
   Init();
   time_neighbor = -GetCurrentTimeSec();
-  std::vector<bool> usd(V, false);  // Used as root? (in new label)
+  vector<bool> usd(V, false);  // Used as root? (in new label)
   {
-    std::vector<uint32_t> que(V);
-    std::vector<uint8_t> tmp_d(V);
-    std::vector<std::pair<uint64_t, uint64_t> > tmp_s(V);
-    std::vector<std::pair<uint32_t, uint32_t> > sibling_es(E);
-    std::vector<std::pair<uint32_t, uint32_t> > child_es(E);
+    vector<uint32_t> que(V);
+    vector<uint8_t> tmp_d(V);
+    vector<pair<uint64_t, uint64_t> > tmp_s(V);
+    vector<pair<uint32_t, uint32_t> > sibling_es(E);
+    vector<pair<uint32_t, uint32_t> > child_es(E);
 
     uint32_t r = 0;
     for (int i_bpspt = 0; i_bpspt < LEN_BP; ++i_bpspt) {
@@ -208,37 +214,33 @@ ConstructIndex() {
         index_[v].bpspt_s[i_bpspt][1] = tmp_s[v].second & ~tmp_s[v].first;
       }
       if (!quiet && i_bpspt % (LEN_BP / 10) == 0){
-        std::cout << time_neighbor+GetCurrentTimeSec() << " (" << (100 * i_bpspt / LEN_BP) << "%) " << std::flush;
+        cout << time_neighbor+GetCurrentTimeSec() << " (" << (100 * i_bpspt / LEN_BP) << "%) " << std::flush;
       }
     }
   }
   time_neighbor += GetCurrentTimeSec();
-  if (!quiet) std::cout << "| Neighbor time: " << time_neighbor << ", BPRoot Size: " << LEN_BP << std::endl;
+  if (!quiet) cout << "| Neighbor time: " << time_neighbor << ", BPRoot Size: " << LEN_BP << endl;
 
   // Pruned labeling
   {
     // Sentinel (V, INF8) is added to all the vertices
-    std::vector<std::pair<std::vector<uint32_t>, std::vector<uint8_t> > >
-        tmp_idx(V, make_pair(std::vector<uint32_t>(1, V),
-                             std::vector<uint8_t>(1, INF8)));
-    std::vector<std::pair<std::vector<uint32_t>, std::vector<uint8_t> > >
-        tmp_inv(V, make_pair(std::vector<uint32_t>(),
-                             std::vector<uint8_t>()));
+    vector< pair<vector<uint32_t>, vector<uint8_t>> >
+        tmp_idx(V, make_pair(vector<uint32_t>(1, V), vector<uint8_t>(1, INF8)));
+    vector< pair<vector<uint32_t>, vector<uint8_t>> >
+        tmp_inv(V, make_pair(vector<uint32_t>(), vector<uint8_t>()));
 
-    std::vector<bool> vis(V);
-    std::vector<uint32_t> que(V);
-    std::queue<uint32_t> que_two;
-    std::vector<uint8_t> dst_r(V + 1, INF8);
-    std::vector<size_t> tmp_len_inv(V);
+    vector<bool> vis(V);
+    vector<uint32_t> que(V);
+    queue<uint32_t> que_two;
+    vector<uint8_t> dst_r(V + 1, INF8);
+    vector<size_t> tmp_len_inv(V);
 
     time_search = -GetCurrentTimeSec();
     for (size_t r = 0; r < V; ++r) {
       if (usd[r]) continue;
       const index_t &idx_r = index_[r];
-      const std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
-          &tmp_idx_r = tmp_idx[r];
-      std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
-          &tmp_inv_r = tmp_inv[r];
+      const pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_r = tmp_idx[r];
+      pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_r = tmp_inv[r];
       for (size_t i = 0; i < tmp_idx_r.first.size(); ++i) {
         dst_r[tmp_idx_r.first[i]] = tmp_idx_r.second[i];
       }
@@ -250,8 +252,7 @@ ConstructIndex() {
       for (uint8_t d = 0; que_t0 < que_h && d < MAXDIST; ++d) {
         for (int que_i = que_t0; que_i < que_t1; ++que_i) {
           const uint32_t v = que[que_i];
-          std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
-              &tmp_idx_v = tmp_idx[v];
+          pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_v = tmp_idx[v];
           const index_t &idx_v = index_[v];
 
           // Prefetch
@@ -312,25 +313,22 @@ ConstructIndex() {
       tmp_len_inv[r] = tmp_inv_r.first.size();
 
       if (!quiet && r % (V / 20) == 0){
-        std::cout << time_search+GetCurrentTimeSec() << " (" << (100 * r / V) << "%) " << std::flush;
+        cout << time_search+GetCurrentTimeSec() << " (" << (100 * r / V) << "%) " << std::flush;
       }
     }
     time_search += GetCurrentTimeSec();
 
     time_two = -GetCurrentTimeSec();
     for (size_t r = 0; r < V; ++r) {
-      const std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
-          &tmp_idx_r = tmp_idx[r];
-      std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
-          &tmp_inv_r = tmp_inv[r];
+      const pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_r = tmp_idx[r];
+      pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_r = tmp_inv[r];
 
       // 2-hop neighbors
       for (size_t i = 0; ; ++i) {
         const uint32_t v = tmp_idx_r.first[i];
         if (v >= r) break;
         const uint8_t d_rv = tmp_idx_r.second[i];
-        const std::pair<std::vector<uint32_t>, std::vector<uint8_t> >
-            &tmp_inv_v = tmp_inv[v];
+        const pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_v = tmp_inv[v];
 
         _mm_prefetch(&tmp_inv_v.first[0], _MM_HINT_T0);
         _mm_prefetch(&tmp_inv_v.second[0], _MM_HINT_T0);
@@ -357,7 +355,7 @@ ConstructIndex() {
       }
 
       if (!quiet && r % (V / 20) == 0){
-        std::cout << time_two+GetCurrentTimeSec() << " (" << (100 * r / V) << "%) " << std::flush;
+        cout << time_two+GetCurrentTimeSec() << " (" << (100 * r / V) << "%) " << std::flush;
       }
     }
     time_two += GetCurrentTimeSec();
@@ -384,22 +382,22 @@ ConstructIndex() {
     }
   }
 
-  if (!quiet) std::cout << "| Search time: " << time_search << ", Two-hop time: " << time_two
-    << ", Avg Label Size: " << AverageLabelSize() << std::endl;
+  if (!quiet) cout << "| Search time: " << time_search << ", Two-hop time: " << time_two
+    << ", Avg Label Size: " << AverageLabelSize() << endl;
   return time_neighbor + time_search + time_two;
 }
 
 // ====================
 int PrunedLandmarkLabeling::
 FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const int n_adj,
-          std::vector<int> &pos, std::vector<int> &dist){
+          vector<int> &pos, vector<int> &dist){
   const uint32_t vv = alias[v];
   const index_t &idx_v = index_[vv];
   size_t n_total = 1 + n_bp + n_spt + n_inv + n_adj;
   size_t s_bp, s_spt, s_inv, s_adj, sn_adj, s_total;
   pos.reserve(n_total);
   dist.reserve(n_total * n_total);
-  std::vector<int> tmp_pos(LEN_BP), tmp_dist(LEN_BP);
+  vector<int> tmp_pos(LEN_BP), tmp_dist(LEN_BP);
 
   // Construct sample
   pos.push_back(vv);
@@ -416,8 +414,8 @@ FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const i
   s_adj = SampleSet(sn_adj, tmp_pos, tmp_dist, pos, dist);
   s_total += s_adj + 1;
 
-  // Query pair-wise distance
-  std::vector<int> argpos(s_total);
+  // Query pair-wise distance: pos (len s) -> dist (s * s)
+  vector<int> argpos(s_total);
   std::iota(argpos.begin(), argpos.end(), 0);
   std::sort(argpos.begin(), argpos.end(), [&pos](int a, int b) {
     return pos[a] > pos[b];
@@ -440,8 +438,8 @@ FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const i
 
   // Align to output
   if (s_total < n_total) {
-    std::vector<std::vector<int>> tile(s_total, std::vector<int>(n_total, 0));
-
+    // pos and tile[i]: s -> n
+    vector<vector<int>> tile(s_total, vector<int>(n_total, 0));
     for (size_t i = 0; i < s_total; ++i) {
       std::copy(dist.begin() + i * s_total, dist.begin() + (i+1) * s_total, tile[i].begin());
     }
@@ -455,6 +453,7 @@ FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const i
     }
     pos.resize(n_total);
 
+    // dist (n * n)
     dist.clear();
     dist.reserve(n_total * n_total);
     for (size_t i = 0; i < s_total; ++i) {
@@ -474,7 +473,7 @@ FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const i
 }
 
 int PrunedLandmarkLabeling::
-Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
+Global(const int v, vector<int> &pos, vector<int> &dist){
   pos.clear();
   dist.clear();
   const index_t &idx_v = index_[v];
@@ -497,7 +496,7 @@ Global(const int v, std::vector<int> &pos, std::vector<int> &dist){
 }
 
 int PrunedLandmarkLabeling::
-Label(const int v, std::vector<int> &pos, std::vector<int> &dist){
+Label(const int v, vector<int> &pos, vector<int> &dist){
   pos.clear();
   dist.clear();
   const index_t &idx_v = index_[v];
@@ -513,7 +512,7 @@ Label(const int v, std::vector<int> &pos, std::vector<int> &dist){
 }
 
 int PrunedLandmarkLabeling::
-InvLabel(const int v, std::vector<int> &pos, std::vector<int> &dist){
+InvLabel(const int v, vector<int> &pos, vector<int> &dist){
   pos.clear();
   dist.clear();
   const index_t &idx_v = index_[v];
@@ -530,12 +529,12 @@ InvLabel(const int v, std::vector<int> &pos, std::vector<int> &dist){
 }
 
 int PrunedLandmarkLabeling::
-SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &dist){
+SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist){
   pos.clear();
   dist.clear();
 
-  std::queue<uint32_t> node_que, dist_que;
-  std::vector<bool> updated(V, false);
+  queue<uint32_t> node_que, dist_que;
+  vector<bool> updated(V, false);
   int d_last = 0;
   node_que.push(v);
   dist_que.push(0);
@@ -578,7 +577,7 @@ SNeighbor(const int v, const int size, std::vector<int> &pos, std::vector<int> &
 }
 
 int PrunedLandmarkLabeling::
-SampleSet(const int size, const std::vector<int> &set, const std::vector<int> &set2, std::vector<int> &ret, std::vector<int> &ret2) {
+SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vector<int> &ret, vector<int> &ret2) {
   if (set.size() <= size) {
     for (size_t i = 0; i < set.size(); ++i) {
       ret.push_back(set[i]);
@@ -587,7 +586,7 @@ SampleSet(const int size, const std::vector<int> &set, const std::vector<int> &s
     return set.size();
   }
 
-  std::vector<bool> usd(set.size(), false);
+  vector<bool> usd(set.size(), false);
   int cnt = 0;
   while (cnt < size) {
     int index = rand() % set.size();
@@ -603,7 +602,7 @@ SampleSet(const int size, const std::vector<int> &set, const std::vector<int> &s
 
 // ====================
 int PrunedLandmarkLabeling::
-QueryDistanceTwo(const int v, const std::vector<int> &nw, std::vector<int> &ret) {
+QueryDistanceTwo(const int v, const vector<int> &nw, vector<int> &ret) {
   // TODO: unordered_map
   const index_t &idx_v = index_[v];
   const size_t len_v = idx_v.len_spt + idx_v.len_inv + idx_v.len_two;
@@ -693,20 +692,20 @@ QueryDistance(const int v, const int w) {
 }
 
 int PrunedLandmarkLabeling::
-QueryDistanceLoop(const std::vector<int> &ns, const std::vector<int> &nt, size_t st, size_t ed, std::vector<int> &ret){
+QueryDistanceLoop(const vector<int> &ns, const vector<int> &nt, size_t st, size_t ed, vector<int> &ret){
   for (size_t i = st; i < ed; i++){
     auto it = ret.begin() + i;
     *it = QueryDistance(ns[i], nt[i]);
     if (!quiet && st == 0 && i % (ed / 10) == 0){
-      std::cout << i << " (" << (100 * i / ed) << "%) " << std::flush;
+      cout << i << " (" << (100 * i / ed) << "%) " << std::flush;
     }
   }
   return (ed - st);
 }
 
 int PrunedLandmarkLabeling::
-QueryDistanceParallel(const std::vector<int> &ns, const std::vector<int> &nt, std::vector<int> &ret){
-  std::vector<std::thread> threads;
+QueryDistanceParallel(const vector<int> &ns, const vector<int> &nt, vector<int> &ret){
+  vector<std::thread> threads;
   size_t st, ed = 0;
   size_t it;
 
@@ -722,21 +721,21 @@ QueryDistanceParallel(const std::vector<int> &ns, const std::vector<int> &nt, st
   }
   for (size_t t = 0; t < NUMTHREAD; t++)
     threads[t].join();
-  std::vector<std::thread>().swap(threads);
+  vector<std::thread>().swap(threads);
   return ret.size();
 }
 
 
 // ====================
 template<typename T> inline
-void write_vector(std::ofstream& ofs, const std::vector<T>& data){
+void write_vector(std::ofstream& ofs, const vector<T>& data){
 	const size_t count = data.size();
 	ofs.write(reinterpret_cast<const char*>(&count), sizeof(size_t));
 	ofs.write(reinterpret_cast<const char*>(&data[0]), count * sizeof(T));
 }
 
 template<typename T> inline
-void read_vector(std::ifstream& ifs, std::vector<T>& data){
+void read_vector(std::ifstream& ifs, vector<T>& data){
 	size_t count;
 	ifs.read(reinterpret_cast<char*>(&count), sizeof(size_t));
 	data.resize(count);
@@ -745,7 +744,7 @@ void read_vector(std::ifstream& ifs, std::vector<T>& data){
 
 bool PrunedLandmarkLabeling::
 StoreIndex(const char *filename) {
-  if (!quiet) std::cout << "Saving index -- " << filename << std::endl;
+  if (!quiet) cout << "Saving index -- " << filename << endl;
   std::ofstream ofs(filename);
   return ofs && StoreIndex(ofs);
 }
@@ -784,7 +783,7 @@ StoreIndex(std::ofstream &ofs) {
 
 bool PrunedLandmarkLabeling::
 LoadIndex(const char *filename) {
-  if (!quiet) std::cout << "Loading index -- " << filename << std::endl;
+  if (!quiet) cout << "Loading index -- " << filename << endl;
   std::ifstream ifs(filename);
   return ifs && LoadIndex(ifs);
 }
