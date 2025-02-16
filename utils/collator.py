@@ -68,17 +68,13 @@ def collate_sim(idx, ids, graph, std=0.0):
     return Batch(attn_bias, x, y, ids)
 
 
-def collate_fetch(idx, c_handler, graph, n_bp, n_spt, n_inv, n_adj, std=0.0):
+def collate_fetch(idx, c_handler, graph, s_total, std=0.0):
     idx = torch.stack(idx, dim=0).flatten() # avoid slice and copy for ids
     batch_size = idx.size(0)
-    s_total = n_bp + n_spt + n_inv + n_adj + 1
 
-    ids = torch.zeros((batch_size, s_total), dtype=int)
-    attn_bias = torch.zeros((batch_size, s_total * s_total), dtype=int)
-    for ir, r in enumerate(idx):
-        pos, dist, _ = c_handler.fetch_node(r, n_bp, n_spt, n_inv, n_adj)
-        ids[ir], attn_bias[ir] = torch.tensor(pos, dtype=int), torch.tensor(dist, dtype=int)
-    attn_bias = attn_bias.view(batch_size, s_total, s_total, 1)
+    ids, attn_bias = c_handler.fetch_parallel(idx.numpy().astype(np.int32), s_total)
+    ids = torch.tensor(ids, dtype=int).view(batch_size, s_total)
+    attn_bias = torch.tensor(attn_bias, dtype=int).view(batch_size, s_total, s_total, 1)
 
     y = graph.y[ids[:, 0].view(-1)].view(-1)
     x = graph.x[ids.view(-1)].view(batch_size, s_total, -1)

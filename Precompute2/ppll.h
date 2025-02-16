@@ -15,8 +15,7 @@
 #include <vector>
 #include <stack>
 #include <queue>
-#include <set>
-#include <unordered_set>
+#include <map>
 #include <unordered_map>
 #include <algorithm>
 #include <cmath>
@@ -28,6 +27,7 @@
 using std::vector;
 using std::pair;
 using std::queue;
+using std::map;
 using std::unordered_map;
 using std::cout;
 using std::endl;
@@ -36,7 +36,10 @@ class PrunedLandmarkLabeling {
 public:
   void ConstructGraph(const vector<uint32_t> &ns, const vector<uint32_t> &nt, const vector<uint32_t> &alias_inv);
   float ConstructIndex();
-  int FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const int n_adj, vector<int> &pos, vector<int> &dist);
+  // node input named by `s` is external id, `v` is internal id
+  int FetchNode(const int s, vector<int> &pos, vector<int> &dist);
+  int FetchLoop(const vector<int> &ns, size_t st, size_t ed, vector<int> &pos, vector<int> &dist);
+  int FetchParallel(const vector<int> &ns, vector<int> &pos, vector<int> &dist);
   inline int Global(const int v, vector<int> &pos, vector<int> &dist);
   inline int Label(const int v, vector<int> &pos, vector<int> &dist);
   inline int InvLabel(const int v, vector<int> &pos, vector<int> &dist);
@@ -52,7 +55,13 @@ public:
   bool StoreIndex(std::ofstream &ofs);
   bool StoreIndex(const char *filename);
 
-  void SetArgs(const bool quiet_) { quiet = quiet_; }
+  void SetArgs(const bool quiet_, const int n_fetch, const int n_bp, const int n_spt, const int n_inv) {
+    quiet = quiet_;
+    NUM_FETCH = n_fetch;
+    NUM_BP = n_bp;
+    NUM_SPT = n_spt;
+    NUM_INV = n_inv;
+  }
   int GetNumVertices() { return V; }
   int GetBP() { return LEN_BP; }
   double AverageLabelSize();
@@ -68,7 +77,12 @@ private:
   static const int LEN_BP = 128;
   static const int NUMTHREAD = 16;
   static const int MAXIDX = 32;   // max label size
-  static const int MAXDIST = 16;  // max search distance
+  static const uint8_t MAXDIST = 12;  // max search distance
+
+  int NUM_BP = 8;
+  int NUM_SPT = 24;
+  int NUM_INV = 12;
+  int NUM_FETCH = 3;
 
   // 4 * 33 * BP + 40 * |L|
   struct index_t {
@@ -319,6 +333,7 @@ ConstructIndex() {
       }
     }
     time_search += GetCurrentTimeSec();
+    if (!quiet) cout << "| Search time: " << time_search << endl;
 
     time_two = -GetCurrentTimeSec();
     for (size_t r = 0; r < V; ++r) {
@@ -384,36 +399,36 @@ ConstructIndex() {
     }
   }
 
-  if (!quiet) cout << "| Search time: " << time_search << ", Two-hop time: " << time_two
-    << ", Avg Label Size: " << AverageLabelSize() << endl;
+  if (!quiet) cout << "| Two-hop time: " << time_two << endl;
+  if (!quiet) AverageLabelSize();
   return time_neighbor + time_search + time_two;
 }
 
 // ====================
 int PrunedLandmarkLabeling::
-FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const int n_adj,
-          vector<int> &pos, vector<int> &dist){
-  const uint32_t vv = alias[v];
-  const index_t &idx_v = index_[vv];
-  size_t n_total = 1 + n_bp + n_spt + n_inv + n_adj;
+FetchNode(const int s, vector<int> &pos, vector<int> &dist){
+  const uint32_t v = alias[s];
+  const index_t &idx_v = index_[v];
   size_t s_bp, s_spt, s_inv, s_adj, sn_adj, s_total;
-  pos.reserve(n_total);
+
   vector<int> tmp_pos(LEN_BP), tmp_dist(LEN_BP);
-  vector<vector<int>> mat(n_total, vector<int>{});
+  vector<vector<int>> mat(NUM_FETCH, vector<int>{});
   vector<int> &mat0 = mat[0];
 
   // Construct sample
-  pos.emplace_back(vv);
+  pos.clear();
+  pos.reserve(NUM_FETCH);
+  pos.emplace_back(v);
   mat0.emplace_back(0);
-  Global(vv, tmp_pos, tmp_dist);
-  s_bp = SampleSet(n_bp, tmp_pos, tmp_dist, pos, mat0);
-  Label(vv, tmp_pos, tmp_dist);
-  s_spt = SampleSet(n_spt, tmp_pos, tmp_dist, pos, mat0);
-  InvLabel(vv, tmp_pos, tmp_dist);
-  s_inv = SampleSet(n_inv, tmp_pos, tmp_dist, pos, mat0);
+  Global(v, tmp_pos, tmp_dist);
+  s_bp = SampleSet(NUM_BP, tmp_pos, tmp_dist, pos, mat0);
+  Label(v, tmp_pos, tmp_dist);
+  s_spt = SampleSet(NUM_SPT, tmp_pos, tmp_dist, pos, mat0);
+  InvLabel(v, tmp_pos, tmp_dist);
+  s_inv = SampleSet(NUM_INV, tmp_pos, tmp_dist, pos, mat0);
   s_total = s_bp + s_spt + s_inv;
-  sn_adj = n_total - s_total - 1;
-  SNeighbor(vv, sn_adj, tmp_pos, tmp_dist);
+  sn_adj = NUM_FETCH - s_total - 1;
+  SNeighbor(v, sn_adj, tmp_pos, tmp_dist);
   s_adj = SampleSet(sn_adj, tmp_pos, tmp_dist, pos, mat0);
   s_total += s_adj + 1;
 
@@ -432,7 +447,7 @@ FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const i
   }
 
   for (int i = s_total-2; i >= 0; --i) {
-    if (pos[argpos[i]] == vv) {
+    if (pos[argpos[i]] == v) {
       tmp_pos.emplace_back(pos[argpos[i]]);
       continue;
     }
@@ -451,8 +466,8 @@ FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const i
 
   // Align to output
   // pos and mat[i]: s -> n
-  while (pos.size() < n_total) {
-    const size_t copy_size = std::min(s_total, n_total - pos.size());
+  while (pos.size() < NUM_FETCH) {
+    const size_t copy_size = std::min(s_total, NUM_FETCH - pos.size());
     pos.insert(pos.end(), pos.begin(), pos.begin() + copy_size);
     for (size_t i = 0; i < s_total; ++i) {
       mat[i].insert(mat[i].end(), mat[i].begin(), mat[i].begin() + copy_size);
@@ -461,19 +476,53 @@ FetchNode(const int v, const int n_bp, const int n_spt, const int n_inv, const i
 
   // dist: s*n -> n*n
   dist.clear();
-  dist.reserve(n_total * n_total);
+  dist.reserve(NUM_FETCH * NUM_FETCH);
   for (size_t i = 0; i < s_total; ++i) {
     dist.insert(dist.end(), std::make_move_iterator(mat[i].begin()),
                             std::make_move_iterator(mat[i].end()));
   }
-  while (dist.size() < n_total * n_total) {
-    const size_t copy_size = std::min(s_total * n_total, n_total * n_total - dist.size());
+  while (dist.size() < NUM_FETCH * NUM_FETCH) {
+    const size_t copy_size = std::min(s_total * NUM_FETCH, NUM_FETCH * NUM_FETCH - dist.size());
     dist.insert(dist.end(), dist.begin(), dist.begin() + copy_size);
   }
 
   return s_total;
 }
 
+int PrunedLandmarkLabeling::
+FetchLoop(const vector<int> &ns, size_t st, size_t ed, vector<int> &pos, vector<int> &dist){
+  vector<int> tmp_pos, tmp_dist;
+  for (size_t i = st; i < ed; i++){
+    FetchNode(ns[i], tmp_pos, tmp_dist);
+    std::copy(tmp_pos.begin(), tmp_pos.end(), pos.begin() + i * NUM_FETCH);
+    std::copy(tmp_dist.begin(), tmp_dist.end(), dist.begin() + i * NUM_FETCH * NUM_FETCH);
+  }
+  return (ed - st);
+}
+
+int PrunedLandmarkLabeling::
+FetchParallel(const vector<int> &ns, vector<int> &pos, vector<int> &dist){
+  vector<std::thread> threads;
+  size_t st, ed = 0;
+  size_t it;
+
+  for (it = 1; it <= ns.size() % NUMTHREAD; it++) {
+    st = ed;
+    ed += std::ceil((float)ns.size() / NUMTHREAD);
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::FetchLoop, this, ref(ns), st, ed, ref(pos), ref(dist)));
+  }
+  for (; it <= NUMTHREAD; it++) {
+    st = ed;
+    ed += ns.size() / NUMTHREAD;
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::FetchLoop, this, ref(ns), st, ed, ref(pos), ref(dist)));
+  }
+  for (size_t t = 0; t < NUMTHREAD; t++)
+    threads[t].join();
+  vector<std::thread>().swap(threads);
+  return pos.size();
+}
+
+// ====================
 int PrunedLandmarkLabeling::
 Global(const int v, vector<int> &pos, vector<int> &dist){
   pos.clear();
@@ -484,7 +533,7 @@ Global(const int v, vector<int> &pos, vector<int> &dist){
   uint8_t d = INF8;
 
   for (int i = 0; i < LEN_BP; ++i){
-    if (idx_v.bpspt_d[i] > MAXDIST/4) continue;
+    if (idx_v.bpspt_d[i] > MAXDIST/2) continue;
     uint8_t td = idx_v.bpspt_d[i];
     if (td <= d) {
       d = td;
@@ -860,11 +909,14 @@ Free() {
 
 double PrunedLandmarkLabeling::
 AverageLabelSize() {
-  double s = 0.0;
+  double s_spt = 0.0, s_inv = 0.0, s_two = 0.0;
   for (size_t v = 0; v < V; ++v) {
-    s += index_[v].len_spt + index_[v].len_inv + index_[v].len_two;
+    s_spt += index_[v].len_spt;
+    s_inv += index_[v].len_inv;
+    s_two += index_[v].len_two;
   }
-  return s / V;
+  if (!quiet) cout << "Avg Label size: " << s_spt / V << " + " << s_inv / V << " + " << s_two / V << endl;
+  return (s_spt + s_inv + s_two) / V;
 }
 
 #endif  // PRUNED_LANDMARK_LABELING_H_

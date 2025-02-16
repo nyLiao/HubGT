@@ -93,13 +93,13 @@ def process_data(args, res_logger=utils.ResLogger()):
 
     deg = np.bincount(edge_index[0], minlength=num_nodes)
     id_map = np.argsort(deg, kind='stable').astype(np.uint32)
-    deg_max = deg[id_map[-1]]
 
     # ===== Build label
     py_pll = PyPLL()
     # time_index = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
     time_index = py_pll.get_index(
-        edge_index, np.flip(id_map), str(args.logpath.parent), args.quiet, args.index)
+        edge_index, np.flip(id_map), str(args.logpath.parent), args.index, args.quiet)
+    py_pll.set_args(args.quiet, args.ss, args.s0g, args.s0, args.s1)
     logger.log(logging.LTRN, f'Index time: {time_index:.2f}')
     del edge_index, data.edge_index, deg
     data.edge_index = None
@@ -113,7 +113,6 @@ def process_data(args, res_logger=utils.ResLogger()):
     loader = {}
     graph = Data(x=x, y=y, num_nodes=num_nodes)
     graph.contiguous('x', 'y')
-    s_adj = args.ss - args.s0 - args.s0g - args.s1 - 1
 
     for split in ['train', 'val', 'test']:
         mask = getattr(data, f'{split}_mask')
@@ -125,11 +124,8 @@ def process_data(args, res_logger=utils.ResLogger()):
             num_workers=(0 if num_nodes < 5e4 else 4),
             shuffle=shuffle,
             collate_fn=partial(collate_fetch,
-                c_handler=py_pll,
-                graph=graph,
-                n_bp=args.s0g, n_spt=args.s0, n_inv=args.s1, n_adj=s_adj,
-                std=std,
-        ))
+                c_handler=py_pll, graph=graph, s_total=args.ss, std=std,)
+        )
         s += f'{split}: {mask.sum().item()}, '
     logger.log(logging.LTRN, s)
     gc.collect()
@@ -153,4 +149,10 @@ if __name__ == '__main__':
     logger = utils.setup_logger(level_file=30, quiet=args.quiet)
 
     loader = process_data(args)
-    next(iter(loader['val']))
+    with utils.Stopwatch() as timer:
+        next(iter(loader['val']))
+    logger.log(logging.LTRN, f'Batch time: {timer}')
+    with utils.Stopwatch() as timer:
+        for batch in loader['val']:
+            pass
+    logger.log(logging.LTRN, f'Full time: {timer}')

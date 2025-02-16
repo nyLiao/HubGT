@@ -8,7 +8,7 @@ cdef extern from "ppll.h":
     cdef cppclass PrunedLandmarkLabeling:
         PrunedLandmarkLabeling() except+
 
-        void SetArgs(bool)
+        void SetArgs(bool, int, int, int, int)
         void ConstructGraph(vector[uint32_t] &, vector[uint32_t] &, vector[uint32_t] &)
         float ConstructIndex()
         bool LoadIndex(char *)
@@ -17,7 +17,8 @@ cdef extern from "ppll.h":
         int QueryDistanceTwo(int, vector[int] &, vector[int] &)
         int QueryDistance(int, int)
         int QueryDistanceParallel(vector[int] &, vector[int] &, vector[int] &)
-        int FetchNode(int, int, int, int, int, vector[int] &, vector[int] &)
+        int FetchNode(int, vector[int] &, vector[int] &)
+        int FetchParallel(vector[int] &, vector[int] &, vector[int] &)
         int Global(int, vector[int] &, vector[int] &)
         int Label(int, vector[int] &, vector[int] &)
         int SNeighbor(int, int, vector[int] &, vector[int] &)
