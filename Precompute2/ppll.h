@@ -46,6 +46,7 @@ public:
   inline int SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist);
 
   inline int QueryDistanceTwo(const int v, const vector<int> &nw, vector<int> &ret);
+  inline int QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &ret);
   inline int QueryDistance(const int v, const int w);
   int QueryDistanceLoop(const vector<int> &ns, const vector<int> &nt, size_t st, size_t ed, vector<int> &ret);
   int QueryDistanceParallel(const vector<int> &ns, const vector<int> &nt, vector<int> &ret);
@@ -95,6 +96,7 @@ private:
     size_t   len_spt, len_inv, len_two;
     uint32_t *spt_v;                // PLL Shortest Path nodes (only smaller ids, sorted) | Inverse nodes (only larger ids, not sorted) | 2-hop nodes
     uint8_t  *spt_d;                // PLL Shortest Path distances
+    pair<uint64_t, uint64_t> *spt_s;
   } __attribute__((aligned(64)));   // Aligned for cache lines
 
   size_t V, E;
@@ -146,12 +148,12 @@ ConstructIndex() {
   Init();
   time_neighbor = -GetCurrentTimeSec();
   vector<bool> usd(V, false);  // Used as root? (in new label)
+  vector<pair<uint64_t, uint64_t> > tmp_s(V+1);
+  vector<uint8_t> tmp_d(V+1);
+  vector<pair<uint32_t, uint32_t> > sibling_es(E);
+  vector<pair<uint32_t, uint32_t> > child_es(E);
   {
     vector<uint32_t> que(V);
-    vector<uint8_t> tmp_d(V);
-    vector<pair<uint64_t, uint64_t> > tmp_s(V);
-    vector<pair<uint32_t, uint32_t> > sibling_es(E);
-    vector<pair<uint32_t, uint32_t> > child_es(E);
 
     uint32_t r = 0;
     for (int i_bpspt = 0; i_bpspt < LEN_BP; ++i_bpspt) {
@@ -247,11 +249,13 @@ ConstructIndex() {
         tmp_idx(V, make_pair(vector<uint32_t>(1, V), vector<uint8_t>(1, INF8)));
     vector< pair<vector<uint32_t>, vector<uint8_t>> >
         tmp_inv(V, make_pair(vector<uint32_t>(), vector<uint8_t>()));
+    vector< pair<vector<uint64_t>, vector<uint64_t>> >
+        tmp_tri(V, make_pair(vector<uint64_t>(1, 0), vector<uint64_t>(1, 0)));
 
     vector<bool> vis(V);
     vector<uint32_t> que(V);
     queue<uint32_t> que_two;
-    vector<uint8_t> dst_r(V + 1, INF8);
+    vector<uint8_t> tmp_dr(V+1, INF8);
     vector<size_t> tmp_len_inv(V);
 
     time_search = -GetCurrentTimeSec();
@@ -260,8 +264,21 @@ ConstructIndex() {
       const index_t &idx_r = index_[r];
       const pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_r = tmp_idx[r];
       pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_r = tmp_inv[r];
+      fill(tmp_d.begin(), tmp_d.end(), INF8);
+      fill(tmp_s.begin(), tmp_s.end(), std::make_pair(0, 0));
+
       for (size_t i = 0; i < tmp_idx_r.first.size(); ++i) {
-        dst_r[tmp_idx_r.first[i]] = tmp_idx_r.second[i];
+        tmp_d[tmp_idx_r.first[i]] = tmp_idx_r.second[i];
+        tmp_dr[tmp_idx_r.first[i]] = tmp_idx_r.second[i];
+      }
+      int nns = 0;
+      for (size_t i = 0; i < adj[r].size(); ++i) {
+        const uint32_t v = adj[r][i];
+        if (!vis[v]) {
+          tmp_d[v] = 1;
+          tmp_s[v].first = 1ULL << nns;
+          if (++nns == MAXIDX) break;
+        }
       }
 
       int que_t0 = 0, que_t1 = 1, que_h = 1;
@@ -269,8 +286,10 @@ ConstructIndex() {
       vis[r] = true;
 
       for (uint8_t d = 0; que_t0 < que_h && d < MAXDIST; ++d) {
+        size_t num_sibling_es = 0, num_child_es = 0;
+
         for (int que_i = que_t0; que_i < que_t1; ++que_i) {
-          const uint32_t v = que[que_i];
+          const uint32_t v = que[que_i];    // v >= r
           pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_v = tmp_idx[v];
           const index_t &idx_v = index_[v];
 
@@ -295,11 +314,12 @@ ConstructIndex() {
           }
           for (size_t i = 0; i < tmp_idx_v.first.size(); ++i) {
             const uint32_t w = tmp_idx_v.first[i];
-            const uint8_t td = tmp_idx_v.second[i] + dst_r[w];
+            const uint8_t td = tmp_idx_v.second[i] + tmp_dr[w];
             if (td <= d) goto pruned;
           }
 
           // Traverse
+          tmp_d[v] = d;
           tmp_idx_v.first .back() = r;
           tmp_idx_v.second.back() = d;
           tmp_idx_v.first .emplace_back(V);
@@ -313,6 +333,19 @@ ConstructIndex() {
             if (!vis[w] && tmp_idx[w].first.size() < MAXIDX) {
               vis[w] = true;
               if (usd[w]) continue;
+
+              if (d == tmp_d[w]) {
+                if (v < w) {
+                  sibling_es[num_sibling_es].first  = v;
+                  sibling_es[num_sibling_es].second = w;
+                  ++num_sibling_es;
+                }
+              } else if (d < tmp_d[w]) {
+                child_es[num_child_es].first  = v;
+                child_es[num_child_es].second = w;
+                ++num_child_es;
+              }
+
               que[que_h++] = w;
             }
           }
@@ -320,13 +353,36 @@ ConstructIndex() {
           {}
         }
 
+        for (size_t i = 0; i < num_sibling_es; ++i) {
+          const uint32_t v = sibling_es[i].first, w = sibling_es[i].second;
+          tmp_s[v].second |= tmp_s[w].first;
+          tmp_s[w].second |= tmp_s[v].first;
+        }
+        for (size_t i = 0; i < num_child_es; ++i) {
+          const uint32_t v = child_es[i].first, c = child_es[i].second;
+          tmp_s[c].first  |= tmp_s[v].first;
+          tmp_s[c].second |= tmp_s[v].second;
+        }
+
         que_t0 = que_t1;
         que_t1 = que_h;
+      } // tmp_idx[r] & tmp_inv[r] are finished
+
+      pair<vector<uint64_t>, vector<uint64_t>> &tmp_tri_r = tmp_tri[r];
+      for (uint32_t v: tmp_idx_r.first) {
+        tmp_tri_r.first .back() = tmp_s[v].first;
+        tmp_tri_r.second.back() = tmp_s[v].second & ~tmp_s[v].first;
+        tmp_tri_r.first .emplace_back(0);
+        tmp_tri_r.second.emplace_back(0);
+      }
+      for (uint32_t v: tmp_inv_r.first) {
+        tmp_tri_r.first .emplace_back(tmp_s[v].first);
+        tmp_tri_r.second.emplace_back(tmp_s[v].second & ~tmp_s[v].first);
       }
 
       for (int i = 0; i < que_h; ++i) vis[que[i]] = false;
       for (size_t i = 0; i < tmp_idx_r.first.size(); ++i) {
-        dst_r[tmp_idx_r.first[i]] = INF8;
+        tmp_dr[tmp_idx_r.first[i]] = INF8;
       }
       usd[r] = true;
       tmp_len_inv[r] = tmp_inv_r.first.size();
@@ -341,6 +397,7 @@ ConstructIndex() {
     time_two = -GetCurrentTimeSec();
     for (size_t r = 0; r < V; ++r) {
       const pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_r = tmp_idx[r];
+      const pair<vector<uint64_t>, vector<uint64_t>> &tmp_tri_r = tmp_tri[r];
       pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_r = tmp_inv[r];
 
       // 2-hop neighbors
@@ -348,8 +405,11 @@ ConstructIndex() {
         const uint32_t v = tmp_idx_r.first[i];
         if (v >= r) break;
         const uint8_t d_rv = tmp_idx_r.second[i];
-        if (d_rv > HMAXDIST) continue;
+        if (d_rv > HMAXDIST-2) continue;
         const pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_v = tmp_inv[v];
+        const pair<vector<uint64_t>, vector<uint64_t>> &tmp_tri_v = tmp_tri[v];
+        const int ir = std::find(tmp_inv[v].first.begin(), tmp_inv[v].first.end(), r) - tmp_inv[v].first.begin();
+        const uint64_t s_rv0 = tmp_tri_v.first[ir], s_rv1 = tmp_tri_v.second[ir];
 
         _mm_prefetch(&tmp_inv_v.first[0], _MM_HINT_T0);
         _mm_prefetch(&tmp_inv_v.second[0], _MM_HINT_T0);
@@ -358,11 +418,21 @@ ConstructIndex() {
           const uint32_t w = tmp_inv_v.first[j];
           if (w >= r) continue;
 
-          const uint8_t td = d_rv + tmp_inv_v.second[j];
+          uint8_t td = d_rv + tmp_inv_v.second[j];
           if (td > HMAXDIST) continue;
-          if (td < dst_r[w]) {
-            dst_r[w] = td;
-            que_two.push(w);
+
+          if (td - 2 <= tmp_dr[w]) {
+            td +=
+                (s_rv0 & tmp_tri_v.first[j]) ? -2 :
+                ((s_rv0 & tmp_tri_v.second[j]) | (s_rv1 & tmp_tri_v.first[j]))
+                ? -1 : 0;
+          }
+
+          if (td < tmp_dr[w]) {
+            if (tmp_dr[w] < MAXDIST) {
+              que_two.push(w);
+            }
+            tmp_dr[w] = td;
           }
         }
       }
@@ -370,10 +440,10 @@ ConstructIndex() {
       while (!que_two.empty()) {
         uint32_t w = que_two.front();
         que_two.pop();
-        if (dst_r[w] >= MAXDIST) continue;
+        if (tmp_dr[w] >= MAXDIST) continue;
         tmp_inv_r.first .emplace_back(w);
-        tmp_inv_r.second.emplace_back(dst_r[w]);
-        dst_r[w] = INF8;
+        tmp_inv_r.second.emplace_back(tmp_dr[w]);
+        tmp_dr[w] = INF8;
       }
 
       if (!quiet && r % (V / 20) == 0){
@@ -389,18 +459,26 @@ ConstructIndex() {
       index_[v].len_inv = tmp_len_inv[v];
       index_[v].len_two = sz_inv - tmp_len_inv[v];
 
+      const size_t sz_tri = sz_idx + tmp_len_inv[v];
       const size_t sz_all = sz_idx + sz_inv;
       index_[v].spt_v = (uint32_t*)memalign(64, sz_all * sizeof(uint32_t));
       index_[v].spt_d = (uint8_t *)memalign(64, sz_all * sizeof(uint8_t ));
+      index_[v].spt_s = (pair<uint64_t, uint64_t>*)memalign(64, sz_tri * sizeof(pair<uint64_t, uint64_t>));
       for (size_t i = 0; i < sz_idx; ++i) index_[v].spt_v[i] = tmp_idx[v].first[i];
       for (size_t i = 0; i < sz_idx; ++i) index_[v].spt_d[i] = tmp_idx[v].second[i];
       for (size_t i = 0; i < sz_inv; ++i)  index_[v].spt_v[sz_idx+i] = tmp_inv[v].first[i];
       for (size_t i = 0; i < sz_inv; ++i)  index_[v].spt_d[sz_idx+i] = tmp_inv[v].second[i];
+      for (size_t i = 0; i < sz_tri; ++i) {
+        index_[v].spt_s[i].first  = tmp_tri[v].first[i];
+        index_[v].spt_s[i].second = tmp_tri[v].second[i];
+      }
 
       tmp_idx[v].first.clear();
       tmp_idx[v].second.clear();
       tmp_inv[v].first.clear();
       tmp_inv[v].second.clear();
+      tmp_tri[v].first.clear();
+      tmp_tri[v].second.clear();
     }
   }
 
@@ -457,7 +535,7 @@ FetchNode(const int s, vector<int> &pos, vector<int> &dist){
       continue;
     }
     tmp_dist.clear();
-    QueryDistanceTwo(pos[argpos[i]], tmp_pos, tmp_dist);
+    QueryDistanceTri(pos[argpos[i]], v, tmp_pos, tmp_dist);
     // mat[argpos[i]][argpos[i]] = 0;
     for (int j = s_total-1; j > i; --j) {
       mat[argpos[i]][argpos[j]] = tmp_dist[s_total-1 - j];
@@ -466,7 +544,8 @@ FetchNode(const int s, vector<int> &pos, vector<int> &dist){
     tmp_pos.emplace_back(pos[argpos[i]]);
   }
   for (size_t i = 0; i < s_total; ++i) {
-    pos[i] = alias_inv[pos[i]];
+      // TODO: return global nodes
+      pos[i] = alias_inv[pos[i]];
   }
 
   // Align to output
@@ -658,15 +737,75 @@ SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vecto
 
 // ====================
 int PrunedLandmarkLabeling::
+QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &ret) {
+  const index_t &idx_v = index_[v];
+  const index_t &idx_r = index_[r];
+  const size_t len_v = idx_v.len_spt + idx_v.len_inv + idx_v.len_two;
+  _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
+  _mm_prefetch(&idx_v.spt_d[0], _MM_HINT_T0);
+  _mm_prefetch(&idx_r.spt_v[0], _MM_HINT_T0);
+  _mm_prefetch(&idx_r.spt_d[0], _MM_HINT_T0);
+  auto endIt = idx_r.spt_v + (idx_r.len_spt + idx_r.len_inv);
+  auto foundIt = std::find(idx_r.spt_v, endIt, v);
+  const int iv = (foundIt != endIt) ? (foundIt - idx_r.spt_v) : -1;
+  const uint64_t s_rv0 = (iv != -1) ? idx_r.spt_s[iv].first : 0;
+  const uint64_t s_rv1 = (iv != -1) ? idx_r.spt_s[iv].second : 0;
+
+  for (size_t j = 0; j < nw.size(); ++j) {
+    const int w = nw[j];
+    if (w >= v) {
+      ret[j] = 0;
+      continue;
+    }
+
+    size_t i = 0;
+    while (i < len_v) {
+      if (idx_v.spt_v[i] == w) {
+        ret[j] = idx_v.spt_d[i];
+        break;
+      }
+      ++i;
+    }
+    if (i < len_v) continue;
+
+    auto foundIt = std::find(idx_r.spt_v, endIt, w);
+    const int iw = (foundIt != endIt) ? (foundIt - idx_r.spt_v) : -1;
+    uint8_t d = INF8;
+    if (iv != -1 && iw != -1) {
+      d = idx_r.spt_d[iv] + idx_r.spt_d[iw]
+        + ((s_rv0 & idx_r.spt_s[iw].first) ? -2 :
+          ((s_rv0 & idx_r.spt_s[iw].second) | (s_rv1 & idx_r.spt_s[iw].first))
+          ? -1 : 0);
+    }
+
+    const index_t &idx_w = index_[w];
+    _mm_prefetch(&idx_v.bpspt_d[0], _MM_HINT_T0);
+    _mm_prefetch(&idx_v.bpspt_s[0], _MM_HINT_T0);
+
+    for (int ibp = 0; ibp < LEN_BP; ++ibp) {
+      uint8_t td = idx_v.bpspt_d[ibp] + idx_w.bpspt_d[ibp];
+      if (td - 2 <= d) {
+        td +=
+            (idx_v.bpspt_s[ibp][0] & idx_w.bpspt_s[ibp][0]) ? -2 :
+            ((idx_v.bpspt_s[ibp][0] & idx_w.bpspt_s[ibp][1]) | (idx_v.bpspt_s[ibp][1] & idx_w.bpspt_s[ibp][0]))
+            ? -1 : 0;
+
+        if (td < d) d = td;
+      }
+    }
+    ret[j] = d;
+  }
+
+  return nw.size();
+}
+
+
+int PrunedLandmarkLabeling::
 QueryDistanceTwo(const int v, const vector<int> &nw, vector<int> &ret) {
   const index_t &idx_v = index_[v];
   const size_t len_v = idx_v.len_spt + idx_v.len_inv + idx_v.len_two;
-  const uint64_t *bps_v = idx_v.bpspt_s[0];
-  const uint8_t  *bpd_v = idx_v.bpspt_d;
   _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
   _mm_prefetch(&idx_v.spt_d[0], _MM_HINT_T0);
-  _mm_prefetch(&bps_v[0], _MM_HINT_T0);
-  _mm_prefetch(&bpd_v[0], _MM_HINT_T0);
 
   for (size_t j = 0; j < nw.size(); ++j) {
     if (nw[j] >= v) {
