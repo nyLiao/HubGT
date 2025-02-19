@@ -99,7 +99,7 @@ def process_data(args, res_logger=utils.ResLogger()):
     # time_index = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
     time_index = py_pll.get_index(
         edge_index, np.flip(id_map), str(args.logpath.parent), args.index, args.quiet)
-    py_pll.set_args(args.quiet, args.ss, args.s0g, args.s0, args.s1)
+    py_pll.set_args(args.quiet, args.seed[0], args.ss, args.s0g, args.s0, args.s1)
     logger.log(logging.LTRN, f'Index time: {time_index:.2f}')
     del edge_index, data.edge_index, deg
     data.edge_index = None

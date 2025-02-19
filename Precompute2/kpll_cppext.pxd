@@ -8,7 +8,7 @@ cdef extern from "ppll.h":
     cdef cppclass PrunedLandmarkLabeling:
         PrunedLandmarkLabeling() except+
 
-        void SetArgs(bool, int, int, int, int)
+        void SetArgs(bool, int, int, int, int, int)
         void ConstructGraph(vector[uint32_t] &, vector[uint32_t] &, vector[uint32_t] &)
         float ConstructIndex()
         bool LoadIndex(char *)

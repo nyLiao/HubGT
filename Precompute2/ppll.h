@@ -55,8 +55,10 @@ public:
   bool StoreIndex(std::ofstream &ofs);
   bool StoreIndex(const char *filename);
 
-  void SetArgs(const bool quiet_, const int n_fetch, const int n_bp, const int n_spt, const int n_inv) {
+  void SetArgs(const bool quiet_, const int seed,
+    const int n_fetch, const int n_bp, const int n_spt, const int n_inv) {
     quiet = quiet_;
+    SEED = seed;
     NUM_FETCH = n_fetch;
     NUM_BP = n_bp;
     NUM_SPT = n_spt;
@@ -78,11 +80,13 @@ private:
   static const int NUMTHREAD = 16;
   static const int MAXIDX = 32;   // max label size
   static const uint8_t MAXDIST = 12;  // max search distance
+  static const uint8_t HMAXDIST = 6;
 
+  int SEED = 42;
+  int NUM_FETCH = 48;
   int NUM_BP = 8;
   int NUM_SPT = 24;
   int NUM_INV = 12;
-  int NUM_FETCH = 3;
 
   // 4 * 33 * BP + 40 * |L|
   struct index_t {
@@ -176,7 +180,7 @@ ConstructIndex() {
           que[que_h++] = v;
           tmp_d[v] = 1;
           tmp_s[v].first = 1ULL << nns;
-          if (++nns == MAXIDX) break;
+          if (++nns == 64) break;
         }
       }
 
@@ -190,14 +194,13 @@ ConstructIndex() {
             const uint32_t tv = adj[v][i];
             const uint8_t  td = d + 1;
 
-            if (d > tmp_d[tv]);
-            else if (d == tmp_d[tv]) {
+            if (d == tmp_d[tv]) {
               if (v < tv) {
                 sibling_es[num_sibling_es].first  = v;
                 sibling_es[num_sibling_es].second = tv;
                 ++num_sibling_es;
               }
-            } else {
+            } else if (d < tmp_d[tv]) {
               if (tmp_d[tv] == INF8) {
                 que[que_h++] = tv;
                 tmp_d[tv] = td;
@@ -301,7 +304,7 @@ ConstructIndex() {
           tmp_idx_v.second.back() = d;
           tmp_idx_v.first .emplace_back(V);
           tmp_idx_v.second.emplace_back(INF8);
-          if (d > 0) {
+          if (d > 0 && d < HMAXDIST) {
             tmp_inv_r.first .emplace_back(v);
             tmp_inv_r.second.emplace_back(d);
           }
@@ -345,6 +348,7 @@ ConstructIndex() {
         const uint32_t v = tmp_idx_r.first[i];
         if (v >= r) break;
         const uint8_t d_rv = tmp_idx_r.second[i];
+        if (d_rv > HMAXDIST) continue;
         const pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_v = tmp_inv[v];
 
         _mm_prefetch(&tmp_inv_v.first[0], _MM_HINT_T0);
@@ -355,6 +359,7 @@ ConstructIndex() {
           if (w >= r) continue;
 
           const uint8_t td = d_rv + tmp_inv_v.second[j];
+          if (td > HMAXDIST) continue;
           if (td < dst_r[w]) {
             dst_r[w] = td;
             que_two.push(w);
@@ -654,7 +659,6 @@ SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vecto
 // ====================
 int PrunedLandmarkLabeling::
 QueryDistanceTwo(const int v, const vector<int> &nw, vector<int> &ret) {
-  // TODO: unordered_map
   const index_t &idx_v = index_[v];
   const size_t len_v = idx_v.len_spt + idx_v.len_inv + idx_v.len_two;
   const uint64_t *bps_v = idx_v.bpspt_s[0];
@@ -887,6 +891,7 @@ Init() {
     index_[v].spt_v = NULL;
     index_[v].spt_d = NULL;
   }
+  srand(SEED);
 }
 
 void PrunedLandmarkLabeling::
@@ -910,12 +915,28 @@ Free() {
 double PrunedLandmarkLabeling::
 AverageLabelSize() {
   double s_spt = 0.0, s_inv = 0.0, s_two = 0.0;
+  double w_two = 0.0, n_two = 0.0;
+  double n1 = 0.0, n2 = 0.0, n3 = 0.0, n4 = 0.0, n5 = 0.0, n6 = 0.0, n7 = 0.0;
   for (size_t v = 0; v < V; ++v) {
     s_spt += index_[v].len_spt;
     s_inv += index_[v].len_inv;
     s_two += index_[v].len_two;
+    for (size_t i = index_[v].len_spt+index_[v].len_inv; i < index_[v].len_spt+index_[v].len_inv+index_[v].len_two; ++i) {
+      switch (index_[v].spt_d[i]) {
+        case 1: n1++; break;
+        case 2: n2++; break;
+        case 3: n3++; break;
+        case 4: n4++; break;
+        case 5: n5++; break;
+        case 6: n6++; break;
+        default: n7++; break;
+      }
+      n_two++;
+      w_two += index_[v].spt_d[i];
+    }
   }
   if (!quiet) cout << "Avg Label size: " << s_spt / V << " + " << s_inv / V << " + " << s_two / V << endl;
+  if (!quiet) cout << "Avg 2-hop size: " << w_two / n_two << " (" << n1/n_two << ", " << n2/n_two << ", " << n3/n_two << ", " << n4/n_two << ", " << n5/n_two << ", " << n6/n_two << ", " << n7/n_two << ")" << endl;
   return (s_spt + s_inv + s_two) / V;
 }
 

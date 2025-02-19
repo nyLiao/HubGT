@@ -32,8 +32,8 @@ cdef class PyPLL:
         self.c_pll.ConstructGraph(ns, nt, alias_inv)
         return self.c_pll.ConstructIndex()
 
-    def set_args(self, bool quiet, int n_fetch, int n_bp, int n_spt, int n_inv):
-        self.c_pll.SetArgs(quiet, n_fetch, n_bp, n_spt, n_inv)
+    def set_args(self, bool quiet, int seed, int n_fetch, int n_bp, int n_spt, int n_inv):
+        self.c_pll.SetArgs(quiet, seed, n_fetch, n_bp, n_spt, n_inv)
 
     def load_index(self, str filename):
         return self.c_pll.LoadIndex(filename.encode('utf-8'))
