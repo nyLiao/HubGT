@@ -36,15 +36,15 @@ class PrunedLandmarkLabeling {
 public:
   void ConstructGraph(const vector<uint32_t> &ns, const vector<uint32_t> &nt, const vector<uint32_t> &alias_inv);
   float ConstructIndex();
-  int ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d, const vector<size_t> &tmp_len_inv,
+  int ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
     const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
     vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
     const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri);
-  int ConstructTwoHopLoop(uint32_t st, uint32_t ed, const vector<size_t> &tmp_len_inv,
+  int ConstructTwoHopLoop(uint32_t st, uint32_t ed,
     const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
     vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
     const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri);
-  int ConstructTwoHopParallel(const vector<size_t> &tmp_len_inv,
+  int ConstructTwoHopParallel(
     const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
     vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
     const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri);
@@ -105,7 +105,7 @@ private:
     uint8_t  bpspt_d[LEN_BP];     // Bit-parallel Shortest Path distances
     uint64_t bpspt_s[LEN_BP][2];  // [0]: S^{-1}, [1]: S^{0}
     size_t   len_spt, len_inv, len_two;
-    uint32_t *spt_v;                // PLL Shortest Path nodes (only smaller ids, sorted) | Inverse nodes (only larger ids, not sorted) | 2-hop nodes
+    uint32_t *spt_v;                // PLL Shortest Path nodes (only smaller ids, sorted) | Inverse nodes (only larger ids, not sorted)
     uint8_t  *spt_d;                // PLL Shortest Path distances
     pair<uint64_t, uint64_t> *spt_s;
   } __attribute__((aligned(64)));   // Aligned for cache lines
@@ -113,6 +113,7 @@ private:
   size_t V, E;
   bool quiet = false;
   index_t *index_;
+  vector<unordered_map<uint32_t, uint8_t>> indexdct_;
   vector<vector<uint32_t> > adj;
   vector<uint32_t> alias, alias_inv;
 
@@ -266,7 +267,6 @@ ConstructIndex() {
     vector<bool> vis(V);
     vector<uint32_t> que(V);
     vector<uint8_t> tmp_dr(V+1, INF8);
-    vector<size_t> tmp_len_inv(V);
 
     time_search = -GetCurrentTimeSec();
     for (size_t r = 0; r < V; ++r) {
@@ -395,7 +395,6 @@ ConstructIndex() {
         tmp_dr[tmp_idx_r.first[i]] = INF8;
       }
       usd[r] = true;
-      tmp_len_inv[r] = tmp_inv_r.first.size();
 
       if (!quiet && r % (V / 20) == 0){
         cout << time_search+GetCurrentTimeSec() << " (" << (100 * r / V) << "%) " << std::flush;
@@ -405,17 +404,17 @@ ConstructIndex() {
     if (!quiet) cout << "| Search time: " << time_search << endl;
 
     time_two = -GetCurrentTimeSec();
-    ConstructTwoHopParallel(tmp_len_inv, tmp_idx, tmp_inv, tmp_tri);
+    ConstructTwoHopParallel(tmp_idx, tmp_inv, tmp_tri);
     time_two += GetCurrentTimeSec();
 
     for (size_t v = 0; v < V; ++v) {
       const size_t sz_idx = tmp_idx[v].first.size();
       const size_t sz_inv = tmp_inv[v].first.size();
       index_[v].len_spt = sz_idx;
-      index_[v].len_inv = tmp_len_inv[v];
-      index_[v].len_two = sz_inv - tmp_len_inv[v];
+      index_[v].len_inv = sz_inv;
+      index_[v].len_two = 0;
 
-      const size_t sz_tri = sz_idx + tmp_len_inv[v];
+      const size_t sz_tri = sz_idx + sz_inv;
       const size_t sz_all = sz_idx + sz_inv;
       index_[v].spt_v = (uint32_t*)memalign(64, sz_all * sizeof(uint32_t));
       index_[v].spt_d = (uint8_t *)memalign(64, sz_all * sizeof(uint8_t ));
@@ -444,14 +443,23 @@ ConstructIndex() {
 }
 
 int PrunedLandmarkLabeling::
-ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d, const vector<size_t> &tmp_len_inv,
+ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
   const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
   vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
   const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri) {
 
   const pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_r = tmp_idx[r];
   pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_r = tmp_inv[r];
+  unordered_map<uint32_t, uint8_t> &dct_r = indexdct_[r];
   queue<uint32_t> que_two;
+
+  dct_r.reserve((tmp_idx_r.first.size() + 1) * (tmp_inv_r.first.size() + 1));
+  for (size_t i = 0; i < tmp_idx_r.first.size(); ++i) {
+    dct_r.emplace(tmp_idx_r.first[i], tmp_idx_r.second[i]);
+  }
+  for (size_t i = 0; i < tmp_inv_r.first.size(); ++i) {
+    dct_r.emplace(tmp_inv_r.first[i], tmp_inv_r.second[i]);
+  }
 
   // 2-hop neighbors
   for (size_t i = 0; ; ++i) {
@@ -467,7 +475,7 @@ ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d, const vector<size_t> &
     _mm_prefetch(&tmp_inv_v.first[0], _MM_HINT_T0);
     _mm_prefetch(&tmp_inv_v.second[0], _MM_HINT_T0);
 
-    for (size_t j = 0; j < tmp_len_inv[v]; ++j) {
+    for (size_t j = 0; j < tmp_inv_v.first.size(); ++j) {
       const uint32_t w = tmp_inv_v.first[j];
       if (w >= r) continue;
 
@@ -494,22 +502,27 @@ ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d, const vector<size_t> &
     uint32_t w = que_two.front();
     que_two.pop();
     if (tmp_d[w] >= MAXDIST) continue;
-    tmp_inv_r.first .emplace_back(w);
-    tmp_inv_r.second.emplace_back(tmp_d[w]);
+
+    auto entry_w = dct_r.find(w);
+    if (entry_w == dct_r.end()) {
+      dct_r.emplace(w, tmp_d[w]);
+    } else if (tmp_d[w] < entry_w->second) {
+      entry_w->second = tmp_d[w];
+    }
     tmp_d[w] = INF8;
   }
-  return tmp_inv_r.first.size() - tmp_len_inv[r];
+  return dct_r.size();
 }
 
 int PrunedLandmarkLabeling::
-ConstructTwoHopLoop(uint32_t st, uint32_t ed, const vector<size_t> &tmp_len_inv,
+ConstructTwoHopLoop(uint32_t st, uint32_t ed,
   const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
   vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
   const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri) {
 
   vector<uint8_t> tmp_d(V+1, INF8);
   for (uint32_t r = st; r < ed; ++r) {
-    ConstructTwoHop(r, tmp_d, tmp_len_inv, tmp_idx, tmp_inv, tmp_tri);
+    ConstructTwoHop(r, tmp_d, tmp_idx, tmp_inv, tmp_tri);
     if (!quiet && st == 0 && r % (ed / 20) == 0){
       cout << r << " (" << (100 * r / ed) << "%) " << std::flush;
     }
@@ -518,7 +531,7 @@ ConstructTwoHopLoop(uint32_t st, uint32_t ed, const vector<size_t> &tmp_len_inv,
 }
 
 int PrunedLandmarkLabeling::
-ConstructTwoHopParallel(const vector<size_t> &tmp_len_inv,
+ConstructTwoHopParallel(
   const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
   vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
   const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri) {
@@ -530,12 +543,12 @@ ConstructTwoHopParallel(const vector<size_t> &tmp_len_inv,
   for (it = 1; it <= V % NUMTHREAD; it++) {
     st = ed;
     ed += std::ceil((float)V / NUMTHREAD);
-    threads.push_back(std::thread(&PrunedLandmarkLabeling::ConstructTwoHopLoop, this, st, ed, ref(tmp_len_inv), ref(tmp_idx), ref(tmp_inv), ref(tmp_tri)));
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::ConstructTwoHopLoop, this, st, ed, ref(tmp_idx), ref(tmp_inv), ref(tmp_tri)));
   }
   for (; it <= NUMTHREAD; it++) {
     st = ed;
     ed += V / NUMTHREAD;
-    threads.push_back(std::thread(&PrunedLandmarkLabeling::ConstructTwoHopLoop, this, st, ed, ref(tmp_len_inv), ref(tmp_idx), ref(tmp_inv), ref(tmp_tri)));
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::ConstructTwoHopLoop, this, st, ed, ref(tmp_idx), ref(tmp_inv), ref(tmp_tri)));
   }
   for (size_t t = 0; t < NUMTHREAD; t++)
     threads[t].join();
@@ -795,6 +808,7 @@ int PrunedLandmarkLabeling::
 QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &ret) {
   const index_t &idx_v = index_[v];
   const index_t &idx_r = index_[r];
+  const unordered_map<uint32_t, uint8_t> &dct_v = indexdct_[v];
   const size_t len_v = idx_v.len_spt + idx_v.len_inv + idx_v.len_two;
   _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
   _mm_prefetch(&idx_v.spt_d[0], _MM_HINT_T0);
@@ -813,19 +827,15 @@ QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &r
       continue;
     }
 
-    size_t i = 0;
-    while (i < len_v) {
-      if (idx_v.spt_v[i] == w) {
-        ret[j] = idx_v.spt_d[i];
-        break;
-      }
-      ++i;
+    auto it = dct_v.find(nw[j]);
+    if (it != dct_v.end()) {
+      ret[j] = it->second;
+      continue;
     }
-    if (i < len_v) continue;
 
+    uint8_t d = INF8;
     auto foundIt = std::find(idx_r.spt_v, endIt, w);
     const int iw = (foundIt != endIt) ? (foundIt - idx_r.spt_v) : -1;
-    uint8_t d = INF8;
     if (iv != -1 && iw != -1) {
       d = idx_r.spt_d[iv] + idx_r.spt_d[iw]
         + ((s_rv0 & idx_r.spt_s[iw].first) ? -2 :
@@ -879,6 +889,8 @@ QueryDistance(const int v, const int w) {
         else ++i2;
       }
     }
+    unordered_map<uint32_t, uint8_t> &dct_v = indexdct_[v];
+    dct_v.emplace(w, d);
   }
   return d;
 }
@@ -1029,6 +1041,7 @@ Init() {
     index_[v].spt_d = NULL;
   }
   srand(SEED);
+  indexdct_.resize(V);
 }
 
 void PrunedLandmarkLabeling::
@@ -1045,6 +1058,7 @@ Free() {
   }
   free(index_);
   index_ = NULL;
+  indexdct_.clear();
   V = 0;
   E = 0;
 }
@@ -1057,9 +1071,9 @@ AverageLabelSize() {
   for (size_t v = 0; v < V; ++v) {
     s_spt += index_[v].len_spt;
     s_inv += index_[v].len_inv;
-    s_two += index_[v].len_two;
-    for (size_t i = index_[v].len_spt+index_[v].len_inv; i < index_[v].len_spt+index_[v].len_inv+index_[v].len_two; ++i) {
-      switch (index_[v].spt_d[i]) {
+    s_two += indexdct_[v].size();
+    for (auto it = indexdct_[v].begin(); it != indexdct_[v].end(); ++it) {
+      switch (it->second) {
         case 1: n1++; break;
         case 2: n2++; break;
         case 3: n3++; break;
@@ -1069,7 +1083,7 @@ AverageLabelSize() {
         default: n7++; break;
       }
       n_two++;
-      w_two += index_[v].spt_d[i];
+      w_two += it->second;
     }
   }
   if (!quiet) cout << "Avg Label size: " << s_spt / V << " + " << s_inv / V << " + " << s_two / V << endl;
