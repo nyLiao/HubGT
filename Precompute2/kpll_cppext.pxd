@@ -14,7 +14,6 @@ cdef extern from "ppll.h":
         bool LoadIndex(char *)
         bool StoreIndex(char *)
 
-        int QueryDistanceTwo(int, vector[int] &, vector[int] &)
         int QueryDistance(int, int)
         int QueryDistanceParallel(vector[int] &, vector[int] &, vector[int] &)
         int FetchNode(int, vector[int] &, vector[int] &)
