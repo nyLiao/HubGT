@@ -37,25 +37,25 @@ public:
   void ConstructGraph(const vector<uint32_t> &ns, const vector<uint32_t> &nt, const vector<uint32_t> &alias_inv);
   float ConstructIndex();
   int ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
-    const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
+    const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
     vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
     const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri);
   int ConstructTwoHopLoop(uint32_t st, uint32_t ed,
-    const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
+    const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
     vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
     const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri);
   int ConstructTwoHopParallel(
-    const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
+    const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
     vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
     const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri);
   // node input named by `s` is external id, `v` is internal id
-  int FetchNode(const int s, vector<int> &pos, vector<int> &dist);
-  int FetchLoop(const vector<int> &ns, size_t st, size_t ed, vector<int> &pos, vector<int> &dist);
-  int FetchParallel(const vector<int> &ns, vector<int> &pos, vector<int> &dist);
-  inline int Global(const int v, vector<int> &pos, vector<int> &dist);
-  inline int Label(const int v, vector<int> &pos, vector<int> &dist);
-  inline int InvLabel(const int v, vector<int> &pos, vector<int> &dist);
-  inline int SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist);
+  int FetchNode(const int s, vector<int> &node, vector<int> &dist);
+  int FetchLoop(const vector<int> &ns, size_t st, size_t ed, vector<int> &node, vector<int> &dist);
+  int FetchParallel(const vector<int> &ns, vector<int> &node, vector<int> &dist);
+  inline int Global(const int v, vector<int> &node, vector<int> &dist);
+  inline int Label(const int v, vector<int> &node, vector<int> &dist);
+  inline int InvLabel(const int v, vector<int> &node, vector<int> &dist);
+  inline int SNeighbor(const int v, const int size, vector<int> &node, vector<int> &dist);
 
   inline int QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &ret);
   inline int QueryDistance(const int v, const int w);
@@ -104,7 +104,7 @@ private:
   struct index_t {
     uint8_t  bpspt_d[LEN_BP];     // Bit-parallel Shortest Path distances
     uint64_t bpspt_s[LEN_BP][2];  // [0]: S^{-1}, [1]: S^{0}
-    size_t   len_spt, len_inv, len_two;
+    size_t   tail_out, tail_in;
     uint32_t *spt_v;                // PLL Shortest Path nodes (only smaller ids, sorted) | Inverse nodes (only larger ids, not sorted)
     uint8_t  *spt_d;                // PLL Shortest Path distances
     pair<uint64_t, uint64_t> *spt_s;
@@ -258,7 +258,7 @@ ConstructIndex() {
   {
     // Sentinel (V, INF8) is added to all the vertices
     vector< pair<vector<uint32_t>, vector<uint8_t>> >
-        tmp_idx(V, make_pair(vector<uint32_t>(1, V), vector<uint8_t>(1, INF8)));
+        tmp_out(V, make_pair(vector<uint32_t>(1, V), vector<uint8_t>(1, INF8)));
     vector< pair<vector<uint32_t>, vector<uint8_t>> >
         tmp_inv(V, make_pair(vector<uint32_t>(), vector<uint8_t>()));
     vector< pair<vector<uint64_t>, vector<uint64_t>> >
@@ -272,14 +272,14 @@ ConstructIndex() {
     for (size_t r = 0; r < V; ++r) {
       if (usd[r]) continue;
       const index_t &idx_r = index_[r];
-      const pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_r = tmp_idx[r];
+      const pair<vector<uint32_t>, vector<uint8_t>> &tmp_out_r = tmp_out[r];
       pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_r = tmp_inv[r];
       fill(tmp_d.begin(), tmp_d.end(), INF8);
       fill(tmp_s.begin(), tmp_s.end(), std::make_pair(0, 0));
 
-      for (size_t i = 0; i < tmp_idx_r.first.size(); ++i) {
-        tmp_d[tmp_idx_r.first[i]] = tmp_idx_r.second[i];
-        tmp_dr[tmp_idx_r.first[i]] = tmp_idx_r.second[i];
+      for (size_t i = 0; i < tmp_out_r.first.size(); ++i) {
+        tmp_d[tmp_out_r.first[i]] = tmp_out_r.second[i];
+        tmp_dr[tmp_out_r.first[i]] = tmp_out_r.second[i];
       }
       int nns = 0;
       for (size_t i = 0; i < adj[r].size(); ++i) {
@@ -300,14 +300,14 @@ ConstructIndex() {
 
         for (int que_i = que_t0; que_i < que_t1; ++que_i) {
           const uint32_t v = que[que_i];    // v >= r
-          pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_v = tmp_idx[v];
+          pair<vector<uint32_t>, vector<uint8_t>> &tmp_out_v = tmp_out[v];
           const index_t &idx_v = index_[v];
 
           // Prefetch
           _mm_prefetch(&idx_v.bpspt_d[0], _MM_HINT_T0);
           _mm_prefetch(&idx_v.bpspt_s[0][0], _MM_HINT_T0);
-          _mm_prefetch(&tmp_idx_v.first[0], _MM_HINT_T0);
-          _mm_prefetch(&tmp_idx_v.second[0], _MM_HINT_T0);
+          _mm_prefetch(&tmp_out_v.first[0], _MM_HINT_T0);
+          _mm_prefetch(&tmp_out_v.second[0], _MM_HINT_T0);
 
           // Prune?
           if (usd[v]) continue;
@@ -322,25 +322,25 @@ ConstructIndex() {
               if (td <= d) goto pruned;
             }
           }
-          for (size_t i = 0; i < tmp_idx_v.first.size(); ++i) {
-            const uint32_t w = tmp_idx_v.first[i];
-            const uint8_t td = tmp_idx_v.second[i] + tmp_dr[w];
+          for (size_t i = 0; i < tmp_out_v.first.size(); ++i) {
+            const uint32_t w = tmp_out_v.first[i];
+            const uint8_t td = tmp_out_v.second[i] + tmp_dr[w];
             if (td <= d) goto pruned;
           }
 
           // Traverse
           tmp_d[v] = d;
-          tmp_idx_v.first .back() = r;
-          tmp_idx_v.second.back() = d;
-          tmp_idx_v.first .emplace_back(V);
-          tmp_idx_v.second.emplace_back(INF8);
+          tmp_out_v.first .back() = r;
+          tmp_out_v.second.back() = d;
+          tmp_out_v.first .emplace_back(V);
+          tmp_out_v.second.emplace_back(INF8);
           if (d > 0 && d < HMAXDIST) {
             tmp_inv_r.first .emplace_back(v);
             tmp_inv_r.second.emplace_back(d);
           }
           for (size_t i = 0; i < adj[v].size(); ++i) {
             const uint32_t w = adj[v][i];
-            if (!vis[w] && tmp_idx[w].first.size() < MAXIDX) {
+            if (!vis[w] && tmp_out[w].first.size() < MAXIDX) {
               vis[w] = true;
               if (usd[w]) continue;
 
@@ -376,10 +376,11 @@ ConstructIndex() {
 
         que_t0 = que_t1;
         que_t1 = que_h;
-      } // tmp_idx[r] & tmp_inv[r] are finished
+      } // tmp_out[r] & tmp_inv[r] are finished
 
       pair<vector<uint64_t>, vector<uint64_t>> &tmp_tri_r = tmp_tri[r];
-      for (uint32_t v: tmp_idx_r.first) {
+      for (uint32_t v: tmp_out_r.first) {
+        if (v == V) continue;
         tmp_tri_r.first .back() = tmp_s[v].first;
         tmp_tri_r.second.back() = tmp_s[v].second & ~tmp_s[v].first;
         tmp_tri_r.first .emplace_back(0);
@@ -391,8 +392,8 @@ ConstructIndex() {
       }
 
       for (int i = 0; i < que_h; ++i) vis[que[i]] = false;
-      for (size_t i = 0; i < tmp_idx_r.first.size(); ++i) {
-        tmp_dr[tmp_idx_r.first[i]] = INF8;
+      for (size_t i = 0; i < tmp_out_r.first.size(); ++i) {
+        tmp_dr[tmp_out_r.first[i]] = INF8;
       }
       usd[r] = true;
 
@@ -404,32 +405,30 @@ ConstructIndex() {
     if (!quiet) cout << "| Search time: " << time_search << endl;
 
     time_two = -GetCurrentTimeSec();
-    ConstructTwoHopParallel(tmp_idx, tmp_inv, tmp_tri);
+    ConstructTwoHopParallel(tmp_out, tmp_inv, tmp_tri);
     time_two += GetCurrentTimeSec();
 
     for (size_t v = 0; v < V; ++v) {
-      const size_t sz_idx = tmp_idx[v].first.size();
+      const size_t sz_out = tmp_out[v].first.size();
       const size_t sz_inv = tmp_inv[v].first.size();
-      index_[v].len_spt = sz_idx;
-      index_[v].len_inv = sz_inv;
-      index_[v].len_two = 0;
+      const size_t sz_all = sz_out + sz_inv;
+      index_[v].tail_out = sz_out;
+      index_[v].tail_in = sz_all;
 
-      const size_t sz_tri = sz_idx + sz_inv;
-      const size_t sz_all = sz_idx + sz_inv;
       index_[v].spt_v = (uint32_t*)memalign(64, sz_all * sizeof(uint32_t));
       index_[v].spt_d = (uint8_t *)memalign(64, sz_all * sizeof(uint8_t ));
-      index_[v].spt_s = (pair<uint64_t, uint64_t>*)memalign(64, sz_tri * sizeof(pair<uint64_t, uint64_t>));
-      for (size_t i = 0; i < sz_idx; ++i) index_[v].spt_v[i] = tmp_idx[v].first[i];
-      for (size_t i = 0; i < sz_idx; ++i) index_[v].spt_d[i] = tmp_idx[v].second[i];
-      for (size_t i = 0; i < sz_inv; ++i)  index_[v].spt_v[sz_idx+i] = tmp_inv[v].first[i];
-      for (size_t i = 0; i < sz_inv; ++i)  index_[v].spt_d[sz_idx+i] = tmp_inv[v].second[i];
-      for (size_t i = 0; i < sz_tri; ++i) {
+      index_[v].spt_s = (pair<uint64_t, uint64_t>*)memalign(64, sz_all * sizeof(pair<uint64_t, uint64_t>));
+      for (size_t i = 0; i < sz_out; ++i) index_[v].spt_v[i] = tmp_out[v].first[i];
+      for (size_t i = 0; i < sz_out; ++i) index_[v].spt_d[i] = tmp_out[v].second[i];
+      for (size_t i = 0; i < sz_inv; ++i) index_[v].spt_v[sz_out+i] = tmp_inv[v].first[i];
+      for (size_t i = 0; i < sz_inv; ++i) index_[v].spt_d[sz_out+i] = tmp_inv[v].second[i];
+      for (size_t i = 0; i < sz_all; ++i) {
         index_[v].spt_s[i].first  = tmp_tri[v].first[i];
         index_[v].spt_s[i].second = tmp_tri[v].second[i];
       }
 
-      tmp_idx[v].first.clear();
-      tmp_idx[v].second.clear();
+      tmp_out[v].first.clear();
+      tmp_out[v].second.clear();
       tmp_inv[v].first.clear();
       tmp_inv[v].second.clear();
       tmp_tri[v].first.clear();
@@ -444,18 +443,23 @@ ConstructIndex() {
 
 int PrunedLandmarkLabeling::
 ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
-  const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
+  const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
   vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
   const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri) {
 
-  const pair<vector<uint32_t>, vector<uint8_t>> &tmp_idx_r = tmp_idx[r];
+  const pair<vector<uint32_t>, vector<uint8_t>> &tmp_out_r = tmp_out[r];
   pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_r = tmp_inv[r];
   unordered_map<uint32_t, uint8_t> &dct_r = indexdct_[r];
   queue<uint32_t> que_two;
 
-  dct_r.reserve((tmp_idx_r.first.size() + 1) * (tmp_inv_r.first.size() + 1));
-  for (size_t i = 0; i < tmp_idx_r.first.size(); ++i) {
-    dct_r.emplace(tmp_idx_r.first[i], tmp_idx_r.second[i]);
+  _mm_prefetch(&tmp_out_r.first[0], _MM_HINT_T0);
+  _mm_prefetch(&tmp_out_r.second[0], _MM_HINT_T0);
+  _mm_prefetch(&tmp_inv_r.first[0], _MM_HINT_T0);
+  _mm_prefetch(&tmp_inv_r.second[0], _MM_HINT_T0);
+
+  dct_r.reserve((tmp_out_r.first.size() + 1) * (tmp_inv_r.first.size() + 1));
+  for (size_t i = 0; i < tmp_out_r.first.size(); ++i) {
+    dct_r.emplace(tmp_out_r.first[i], tmp_out_r.second[i]);
   }
   for (size_t i = 0; i < tmp_inv_r.first.size(); ++i) {
     dct_r.emplace(tmp_inv_r.first[i], tmp_inv_r.second[i]);
@@ -463,13 +467,14 @@ ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
 
   // 2-hop neighbors
   for (size_t i = 0; ; ++i) {
-    const uint32_t v = tmp_idx_r.first[i];
+    const uint32_t v = tmp_out_r.first[i];
     if (v >= r) break;
-    const uint8_t d_rv = tmp_idx_r.second[i];
+    const uint8_t d_rv = tmp_out_r.second[i];
     if (d_rv > HMAXDIST-2) continue;
     const pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_v = tmp_inv[v];
     const pair<vector<uint64_t>, vector<uint64_t>> &tmp_tri_v = tmp_tri[v];
-    const int ir = std::find(tmp_inv[v].first.begin(), tmp_inv[v].first.end(), r) - tmp_inv[v].first.begin();
+    const auto foundIt = std::find(tmp_inv_v.first.begin(), tmp_inv_v.first.end(), r);
+    const int ir = (foundIt == tmp_inv_v.first.end()) ? -1 : foundIt - tmp_inv_v.first.begin() + tmp_out[v].first.size();
     const uint64_t s_rv0 = tmp_tri_v.first[ir], s_rv1 = tmp_tri_v.second[ir];
 
     _mm_prefetch(&tmp_inv_v.first[0], _MM_HINT_T0);
@@ -483,9 +488,10 @@ ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
       if (td > HMAXDIST) continue;
 
       if (td - 2 <= tmp_d[w]) {
+        const size_t iv = j + tmp_out[v].first.size();
         td +=
-            (s_rv0 & tmp_tri_v.first[j]) ? -2 :
-            ((s_rv0 & tmp_tri_v.second[j]) | (s_rv1 & tmp_tri_v.first[j]))
+            (s_rv0 & tmp_tri_v.first[iv]) ? -2 :
+            ((s_rv0 & tmp_tri_v.second[iv]) | (s_rv1 & tmp_tri_v.first[iv]))
             ? -1 : 0;
 
         if (td < tmp_d[w]) {
@@ -516,13 +522,13 @@ ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
 
 int PrunedLandmarkLabeling::
 ConstructTwoHopLoop(uint32_t st, uint32_t ed,
-  const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
+  const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
   vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
   const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri) {
 
   vector<uint8_t> tmp_d(V+1, INF8);
   for (uint32_t r = st; r < ed; ++r) {
-    ConstructTwoHop(r, tmp_d, tmp_idx, tmp_inv, tmp_tri);
+    ConstructTwoHop(r, tmp_d, tmp_out, tmp_inv, tmp_tri);
     if (!quiet && st == 0 && r % (ed / 20) == 0){
       cout << r << " (" << (100 * r / ed) << "%) " << std::flush;
     }
@@ -532,7 +538,7 @@ ConstructTwoHopLoop(uint32_t st, uint32_t ed,
 
 int PrunedLandmarkLabeling::
 ConstructTwoHopParallel(
-  const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_idx,
+  const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
   vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
   const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri) {
 
@@ -543,12 +549,12 @@ ConstructTwoHopParallel(
   for (it = 1; it <= V % NUMTHREAD; it++) {
     st = ed;
     ed += std::ceil((float)V / NUMTHREAD);
-    threads.push_back(std::thread(&PrunedLandmarkLabeling::ConstructTwoHopLoop, this, st, ed, ref(tmp_idx), ref(tmp_inv), ref(tmp_tri)));
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::ConstructTwoHopLoop, this, st, ed, ref(tmp_out), ref(tmp_inv), ref(tmp_tri)));
   }
   for (; it <= NUMTHREAD; it++) {
     st = ed;
     ed += V / NUMTHREAD;
-    threads.push_back(std::thread(&PrunedLandmarkLabeling::ConstructTwoHopLoop, this, st, ed, ref(tmp_idx), ref(tmp_inv), ref(tmp_tri)));
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::ConstructTwoHopLoop, this, st, ed, ref(tmp_out), ref(tmp_inv), ref(tmp_tri)));
   }
   for (size_t t = 0; t < NUMTHREAD; t++)
     threads[t].join();
@@ -558,69 +564,69 @@ ConstructTwoHopParallel(
 
 // ====================
 int PrunedLandmarkLabeling::
-FetchNode(const int s, vector<int> &pos, vector<int> &dist){
+FetchNode(const int s, vector<int> &node, vector<int> &dist){
   const uint32_t v = alias[s];
   size_t s_bp, s_spt, s_inv, s_adj, sn_adj, s_total;
 
-  vector<int> tmp_pos(LEN_BP), tmp_dist(LEN_BP);
+  vector<int> tmp_node(LEN_BP), tmp_dist(LEN_BP);
   vector<vector<int>> mat(NUM_FETCH, vector<int>{});
   vector<int> &mat0 = mat[0];
 
   // Construct sample
-  pos.clear();
-  pos.reserve(NUM_FETCH);
-  pos.emplace_back(v);
+  node.clear();
+  node.reserve(NUM_FETCH);
+  node.emplace_back(v);
   mat0.emplace_back(0);
-  Global(v, tmp_pos, tmp_dist);
-  s_bp = SampleSet(NUM_BP, tmp_pos, tmp_dist, pos, mat0);
-  Label(v, tmp_pos, tmp_dist);
-  s_spt = SampleSet(NUM_SPT, tmp_pos, tmp_dist, pos, mat0);
-  InvLabel(v, tmp_pos, tmp_dist);
-  s_inv = SampleSet(NUM_INV, tmp_pos, tmp_dist, pos, mat0);
+  Global(v, tmp_node, tmp_dist);
+  s_bp = SampleSet(NUM_BP, tmp_node, tmp_dist, node, mat0);
+  Label(v, tmp_node, tmp_dist);
+  s_spt = SampleSet(NUM_SPT, tmp_node, tmp_dist, node, mat0);
+  InvLabel(v, tmp_node, tmp_dist);
+  s_inv = SampleSet(NUM_INV, tmp_node, tmp_dist, node, mat0);
   s_total = s_bp + s_spt + s_inv;
   sn_adj = NUM_FETCH - s_total - 1;
-  SNeighbor(v, sn_adj, tmp_pos, tmp_dist);
-  s_adj = SampleSet(sn_adj, tmp_pos, tmp_dist, pos, mat0);
+  SNeighbor(v, sn_adj, tmp_node, tmp_dist);
+  s_adj = SampleSet(sn_adj, tmp_node, tmp_dist, node, mat0);
   s_total += s_adj + 1;
 
-  // Query pair-wise distance: pos (len s) -> dist (s * s)
-  vector<int> argpos(s_total);
-  std::iota(argpos.begin(), argpos.end(), 0);
-  std::sort(argpos.begin(), argpos.end(), [&pos](int a, int b) {
-    return pos[a] > pos[b];
+  // Query pair-wise distance: node (len s) -> dist (s * s)
+  vector<int> argnode(s_total);
+  std::iota(argnode.begin(), argnode.end(), 0);
+  std::sort(argnode.begin(), argnode.end(), [&node](int a, int b) {
+    return node[a] > node[b];
   });
 
-  tmp_pos.clear();
-  tmp_pos.emplace_back(pos[argpos[s_total-1]]);
+  tmp_node.clear();
+  tmp_node.emplace_back(node[argnode[s_total-1]]);
   for (size_t j = 1; j < s_total; ++j) {
     mat[j].resize(s_total);
     mat[j][0] = mat0[j];
   }
 
   for (int i = s_total-2; i >= 0; --i) {
-    if (pos[argpos[i]] == v) {
-      tmp_pos.emplace_back(pos[argpos[i]]);
+    if (node[argnode[i]] == v) {
+      tmp_node.emplace_back(node[argnode[i]]);
       continue;
     }
     tmp_dist.clear();
-    QueryDistanceTri(pos[argpos[i]], v, tmp_pos, tmp_dist);
-    // mat[argpos[i]][argpos[i]] = 0;
+    QueryDistanceTri(node[argnode[i]], v, tmp_node, tmp_dist);
+    // mat[argnode[i]][argnode[i]] = 0;
     for (int j = s_total-1; j > i; --j) {
-      mat[argpos[i]][argpos[j]] = tmp_dist[s_total-1 - j];
-      mat[argpos[j]][argpos[i]] = tmp_dist[s_total-1 - j];
+      mat[argnode[i]][argnode[j]] = tmp_dist[s_total-1 - j];
+      mat[argnode[j]][argnode[i]] = tmp_dist[s_total-1 - j];
     }
-    tmp_pos.emplace_back(pos[argpos[i]]);
+    tmp_node.emplace_back(node[argnode[i]]);
   }
   for (size_t i = 0; i < s_total; ++i) {
       // TODO: return global nodes
-      pos[i] = alias_inv[pos[i]];
+      node[i] = alias_inv[node[i]];
   }
 
   // Align to output
-  // pos and mat[i]: s -> n
-  while (pos.size() < NUM_FETCH) {
-    const size_t copy_size = std::min(s_total, NUM_FETCH - pos.size());
-    pos.insert(pos.end(), pos.begin(), pos.begin() + copy_size);
+  // node and mat[i]: s -> n
+  while (node.size() < NUM_FETCH) {
+    const size_t copy_size = std::min(s_total, NUM_FETCH - node.size());
+    node.insert(node.end(), node.begin(), node.begin() + copy_size);
     for (size_t i = 0; i < s_total; ++i) {
       mat[i].insert(mat[i].end(), mat[i].begin(), mat[i].begin() + copy_size);
     }
@@ -642,18 +648,18 @@ FetchNode(const int s, vector<int> &pos, vector<int> &dist){
 }
 
 int PrunedLandmarkLabeling::
-FetchLoop(const vector<int> &ns, size_t st, size_t ed, vector<int> &pos, vector<int> &dist){
-  vector<int> tmp_pos, tmp_dist;
+FetchLoop(const vector<int> &ns, size_t st, size_t ed, vector<int> &node, vector<int> &dist){
+  vector<int> tmp_node, tmp_dist;
   for (size_t i = st; i < ed; i++){
-    FetchNode(ns[i], tmp_pos, tmp_dist);
-    std::copy(tmp_pos.begin(), tmp_pos.end(), pos.begin() + i * NUM_FETCH);
+    FetchNode(ns[i], tmp_node, tmp_dist);
+    std::copy(tmp_node.begin(), tmp_node.end(), node.begin() + i * NUM_FETCH);
     std::copy(tmp_dist.begin(), tmp_dist.end(), dist.begin() + i * NUM_FETCH * NUM_FETCH);
   }
   return (ed - st);
 }
 
 int PrunedLandmarkLabeling::
-FetchParallel(const vector<int> &ns, vector<int> &pos, vector<int> &dist){
+FetchParallel(const vector<int> &ns, vector<int> &node, vector<int> &dist){
   vector<std::thread> threads;
   size_t st, ed = 0;
   size_t it;
@@ -661,23 +667,23 @@ FetchParallel(const vector<int> &ns, vector<int> &pos, vector<int> &dist){
   for (it = 1; it <= ns.size() % NUMTHREAD; it++) {
     st = ed;
     ed += std::ceil((float)ns.size() / NUMTHREAD);
-    threads.push_back(std::thread(&PrunedLandmarkLabeling::FetchLoop, this, ref(ns), st, ed, ref(pos), ref(dist)));
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::FetchLoop, this, ref(ns), st, ed, ref(node), ref(dist)));
   }
   for (; it <= NUMTHREAD; it++) {
     st = ed;
     ed += ns.size() / NUMTHREAD;
-    threads.push_back(std::thread(&PrunedLandmarkLabeling::FetchLoop, this, ref(ns), st, ed, ref(pos), ref(dist)));
+    threads.push_back(std::thread(&PrunedLandmarkLabeling::FetchLoop, this, ref(ns), st, ed, ref(node), ref(dist)));
   }
   for (size_t t = 0; t < NUMTHREAD; t++)
     threads[t].join();
   vector<std::thread>().swap(threads);
-  return pos.size();
+  return node.size();
 }
 
 // ====================
 int PrunedLandmarkLabeling::
-Global(const int v, vector<int> &pos, vector<int> &dist){
-  pos.clear();
+Global(const int v, vector<int> &node, vector<int> &dist){
+  node.clear();
   dist.clear();
   const index_t &idx_v = index_[v];
   _mm_prefetch(&idx_v.bpspt_d[0], _MM_HINT_T0);
@@ -691,16 +697,16 @@ Global(const int v, vector<int> &pos, vector<int> &dist){
       d = td;
       if ((d == 0) && (V+i == v)) break;
       if (d == 0) d++;
-      pos.emplace_back(alias[V+i]);
+      node.emplace_back(alias[V+i]);
       dist.emplace_back(d);
     }
   }
-  return pos.size();
+  return node.size();
 }
 
 int PrunedLandmarkLabeling::
-Label(const int v, vector<int> &pos, vector<int> &dist){
-  pos.clear();
+Label(const int v, vector<int> &node, vector<int> &dist){
+  node.clear();
   dist.clear();
   const index_t &idx_v = index_[v];
   _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
@@ -708,32 +714,31 @@ Label(const int v, vector<int> &pos, vector<int> &dist){
 
   for (size_t i = 0; idx_v.spt_v[i] != V; ++i){
     if (idx_v.spt_d[i] == 0) continue;
-    pos.emplace_back(idx_v.spt_v[i]);
+    node.emplace_back(idx_v.spt_v[i]);
     dist.emplace_back(idx_v.spt_d[i]);
   }
-  return pos.size();
+  return node.size();
 }
 
 int PrunedLandmarkLabeling::
-InvLabel(const int v, vector<int> &pos, vector<int> &dist){
-  pos.clear();
+InvLabel(const int v, vector<int> &node, vector<int> &dist){
+  node.clear();
   dist.clear();
   const index_t &idx_v = index_[v];
-  const size_t acc_spt = idx_v.len_spt, acc_inv = idx_v.len_spt + idx_v.len_inv;
-  _mm_prefetch(&idx_v.spt_v[acc_spt], _MM_HINT_T0);
-  _mm_prefetch(&idx_v.spt_d[acc_spt], _MM_HINT_T0);
+  _mm_prefetch(&idx_v.spt_v[idx_v.tail_out], _MM_HINT_T0);
+  _mm_prefetch(&idx_v.spt_d[idx_v.tail_out], _MM_HINT_T0);
 
-  for (size_t i = acc_spt; i < acc_inv; ++i){
+  for (size_t i = idx_v.tail_out; i < idx_v.tail_in; ++i){
     if (idx_v.spt_d[i] == 0) continue;
-    pos.emplace_back(idx_v.spt_v[i]);
+    node.emplace_back(idx_v.spt_v[i]);
     dist.emplace_back(idx_v.spt_d[i]);
   }
-  return pos.size();
+  return node.size();
 }
 
 int PrunedLandmarkLabeling::
-SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist){
-  pos.clear();
+SNeighbor(const int v, const int size, vector<int> &node, vector<int> &dist){
+  node.clear();
   dist.clear();
 
   queue<uint32_t> node_que, dist_que;
@@ -743,13 +748,13 @@ SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist){
   dist_que.push(0);
   vis[v] = true;
 
-  while (!node_que.empty() && pos.size() < size_t(4*size*size)){
+  while (!node_que.empty() && node.size() < size_t(4*size*size)){
     uint32_t u = node_que.front();
     uint8_t  d = dist_que.front();
     node_que.pop();
     dist_que.pop();
     // Exit condition for every hop
-    if (d > d_last && pos.size() >= size_t(size)) break;
+    if (d > d_last && node.size() >= size_t(size)) break;
     d_last = d;
 
     if (adj[u].size() > MAXIDX){
@@ -759,7 +764,7 @@ SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist){
         if (vis[adj[u][i]]) continue;
         node_que.push(adj[u][i]);
         dist_que.push(d + 1);
-        pos.emplace_back(adj[u][i]);
+        node.emplace_back(adj[u][i]);
         dist.emplace_back(d + 1);
         vis[adj[u][i]] = true;
       }
@@ -769,14 +774,14 @@ SNeighbor(const int v, const int size, vector<int> &pos, vector<int> &dist){
         if (vis[adj[u][i]]) continue;
         node_que.push(adj[u][i]);
         dist_que.push(d + 1);
-        pos.emplace_back(adj[u][i]);
+        node.emplace_back(adj[u][i]);
         dist.emplace_back(d + 1);
         vis[adj[u][i]] = true;
       }
     }
   }
 
-  return pos.size();
+  return node.size();
 }
 
 int PrunedLandmarkLabeling::
@@ -809,12 +814,11 @@ QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &r
   const index_t &idx_v = index_[v];
   const index_t &idx_r = index_[r];
   const unordered_map<uint32_t, uint8_t> &dct_v = indexdct_[v];
-  const size_t len_v = idx_v.len_spt + idx_v.len_inv + idx_v.len_two;
   _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
   _mm_prefetch(&idx_v.spt_d[0], _MM_HINT_T0);
   _mm_prefetch(&idx_r.spt_v[0], _MM_HINT_T0);
   _mm_prefetch(&idx_r.spt_d[0], _MM_HINT_T0);
-  auto endIt = idx_r.spt_v + (idx_r.len_spt + idx_r.len_inv);
+  auto endIt = idx_r.spt_v + idx_r.tail_in;
   auto foundIt = std::find(idx_r.spt_v, endIt, v);
   const int iv = (foundIt != endIt) ? (foundIt - idx_r.spt_v) : -1;
   const uint64_t s_rv0 = (iv != -1) ? idx_r.spt_s[iv].first : 0;
@@ -972,11 +976,9 @@ StoreIndex(std::ofstream &ofs) {
       WRITE_BINARY(idx.bpspt_s[i][1]);
     }
 
-    WRITE_BINARY(idx.len_spt);
-    WRITE_BINARY(idx.len_inv);
-    WRITE_BINARY(idx.len_two);
-    const size_t acc_two = idx.len_spt + idx.len_inv + idx.len_two;
-    for (uint32_t i = 0; i < acc_two; ++i) {
+    WRITE_BINARY(idx.tail_out);
+    WRITE_BINARY(idx.tail_in);
+    for (uint32_t i = 0; i < idx.tail_in; ++i) {
       WRITE_BINARY(idx.spt_v[i]);
       WRITE_BINARY(idx.spt_d[i]);
     }
@@ -1014,13 +1016,11 @@ LoadIndex(std::ifstream &ifs) {
       READ_BINARY(idx.bpspt_s[i][1]);
     }
 
-    READ_BINARY(idx.len_spt);
-    READ_BINARY(idx.len_inv);
-    READ_BINARY(idx.len_two);
-    const size_t acc_two = idx.len_spt + idx.len_inv + idx.len_two;
-    idx.spt_v = (uint32_t*)memalign(64, acc_two * sizeof(uint32_t));
-    idx.spt_d = (uint8_t *)memalign(64, acc_two * sizeof(uint8_t ));
-    for (uint32_t i = 0; i < acc_two; ++i) {
+    READ_BINARY(idx.tail_out);
+    READ_BINARY(idx.tail_in);
+    idx.spt_v = (uint32_t*)memalign(64, idx.tail_in * sizeof(uint32_t));
+    idx.spt_d = (uint8_t *)memalign(64, idx.tail_in * sizeof(uint8_t ));
+    for (uint32_t i = 0; i < idx.tail_in; ++i) {
       READ_BINARY(idx.spt_v[i]);
       READ_BINARY(idx.spt_d[i]);
     }
@@ -1069,8 +1069,8 @@ AverageLabelSize() {
   double w_two = 0.0, n_two = 0.0;
   double n1 = 0.0, n2 = 0.0, n3 = 0.0, n4 = 0.0, n5 = 0.0, n6 = 0.0, n7 = 0.0;
   for (size_t v = 0; v < V; ++v) {
-    s_spt += index_[v].len_spt;
-    s_inv += index_[v].len_inv;
+    s_spt += index_[v].tail_out;
+    s_inv += index_[v].tail_in - index_[v].tail_out;
     s_two += indexdct_[v].size();
     for (auto it = indexdct_[v].begin(); it != indexdct_[v].end(); ++it) {
       switch (it->second) {
