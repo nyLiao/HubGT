@@ -38,26 +38,22 @@ public:
   float ConstructIndex();
   int ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
     const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
-    vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
+    const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
     const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri);
   int ConstructTwoHopLoop(uint32_t st, uint32_t ed,
     const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
-    vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
+    const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
     const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri);
   int ConstructTwoHopParallel(
     const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
-    vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
+    const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
     const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri);
   // node input named by `s` is external id, `v` is internal id
   int FetchNode(const int s, vector<int> &node, vector<int> &dist);
   int FetchLoop(const vector<int> &ns, size_t st, size_t ed, vector<int> &node, vector<int> &dist);
   int FetchParallel(const vector<int> &ns, vector<int> &node, vector<int> &dist);
-  inline int Global(const int v, vector<int> &node, vector<int> &dist);
-  inline int Label(const int v, vector<int> &node, vector<int> &dist);
-  inline int InvLabel(const int v, vector<int> &node, vector<int> &dist);
-  inline int SNeighbor(const int v, const int size, vector<int> &node, vector<int> &dist);
 
-  inline int QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &ret);
+  inline int QueryDistanceTri(const int r, const vector<int> &nw, const vector<int> &ids, vector<int> &ret);
   inline int QueryDistance(const int v, const int w);
   int QueryDistanceLoop(const vector<int> &ns, const vector<int> &nt, size_t st, size_t ed, vector<int> &ret);
   int QueryDistanceParallel(const vector<int> &ns, const vector<int> &nt, vector<int> &ret);
@@ -113,13 +109,20 @@ private:
   size_t V, E;
   bool quiet = false;
   index_t *index_;
-  vector<unordered_map<uint32_t, uint8_t>> indexdct_;
+  vector<unordered_map<uint32_t, uint8_t>> indexdct_; // only smaller ids
   vector<vector<uint32_t> > adj;
   vector<uint32_t> alias, alias_inv;
 
   inline void Init();
   void Free();
-  inline int SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vector<int> &ret, vector<int> &ret2);
+
+  inline int Global(const int v, vector<int> &node, vector<int> &dist, vector<int> &ids);
+  inline int Label(const int v, vector<int> &node, vector<int> &dist, vector<int> &ids);
+  inline int InvLabel(const int v, vector<int> &node, vector<int> &dist, vector<int> &ids);
+  inline int SNeighbor(const int v, const int size, vector<int> &node, vector<int> &dist, vector<int> &ids);
+  inline int SampleSet(const int size,
+    const vector<int> &set, const vector<int> &set2, const vector<int> &set3,
+    vector<int> &ret, vector<int> &ret2, vector<int> &ret3);
 
   double GetCurrentTimeSec() {
     struct timeval tv;
@@ -444,11 +447,11 @@ ConstructIndex() {
 int PrunedLandmarkLabeling::
 ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
   const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
-  vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
+  const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
   const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri) {
 
   const pair<vector<uint32_t>, vector<uint8_t>> &tmp_out_r = tmp_out[r];
-  pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_r = tmp_inv[r];
+  const pair<vector<uint32_t>, vector<uint8_t>> &tmp_inv_r = tmp_inv[r];
   unordered_map<uint32_t, uint8_t> &dct_r = indexdct_[r];
   queue<uint32_t> que_two;
 
@@ -523,7 +526,7 @@ ConstructTwoHop(const uint32_t r, vector<uint8_t> &tmp_d,
 int PrunedLandmarkLabeling::
 ConstructTwoHopLoop(uint32_t st, uint32_t ed,
   const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
-  vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
+  const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
   const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri) {
 
   vector<uint8_t> tmp_d(V+1, INF8);
@@ -539,7 +542,7 @@ ConstructTwoHopLoop(uint32_t st, uint32_t ed,
 int PrunedLandmarkLabeling::
 ConstructTwoHopParallel(
   const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_out,
-  vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
+  const vector<pair<vector<uint32_t>, vector<uint8_t>>> &tmp_inv,
   const vector<pair<vector<uint64_t>, vector<uint64_t>>> &tmp_tri) {
 
   vector<std::thread> threads;
@@ -566,28 +569,41 @@ ConstructTwoHopParallel(
 int PrunedLandmarkLabeling::
 FetchNode(const int s, vector<int> &node, vector<int> &dist){
   const uint32_t v = alias[s];
+  const index_t &idx_v = index_[v];
   size_t s_bp, s_spt, s_inv, s_adj, sn_adj, s_total;
 
-  vector<int> tmp_node(LEN_BP), tmp_dist(LEN_BP);
+  vector<int> tmp_node(4*MAXIDX), tmp_dist(4*MAXIDX);
+  vector<int> ids(4*MAXIDX), tmp_ids(4*MAXIDX);
   vector<vector<int>> mat(NUM_FETCH, vector<int>{});
   vector<int> &mat0 = mat[0];
 
   // Construct sample
   node.clear();
   node.reserve(NUM_FETCH);
+  ids.clear();
+  ids.reserve(NUM_FETCH);
   node.emplace_back(v);
   mat0.emplace_back(0);
-  Global(v, tmp_node, tmp_dist);
-  s_bp = SampleSet(NUM_BP, tmp_node, tmp_dist, node, mat0);
-  Label(v, tmp_node, tmp_dist);
-  s_spt = SampleSet(NUM_SPT, tmp_node, tmp_dist, node, mat0);
-  InvLabel(v, tmp_node, tmp_dist);
-  s_inv = SampleSet(NUM_INV, tmp_node, tmp_dist, node, mat0);
+  ids.emplace_back(-1);
+
+  Global(v, tmp_node, tmp_dist, tmp_ids);
+  s_bp = SampleSet(NUM_BP, tmp_node, tmp_dist, tmp_ids, node, mat0, ids);
+  Label(v, tmp_node, tmp_dist, tmp_ids);
+  s_spt = SampleSet(NUM_SPT, tmp_node, tmp_dist, tmp_ids, node, mat0, ids);
+  InvLabel(v, tmp_node, tmp_dist, tmp_ids);
+  s_inv = SampleSet(NUM_INV, tmp_node, tmp_dist, tmp_ids, node, mat0, ids);
   s_total = s_bp + s_spt + s_inv;
   sn_adj = NUM_FETCH - s_total - 1;
-  SNeighbor(v, sn_adj, tmp_node, tmp_dist);
-  s_adj = SampleSet(sn_adj, tmp_node, tmp_dist, node, mat0);
+  SNeighbor(v, sn_adj, tmp_node, tmp_dist, tmp_ids);
+  s_adj = SampleSet(sn_adj, tmp_node, tmp_dist, tmp_ids, node, mat0, ids);
   s_total += s_adj + 1;
+
+  auto endIt = idx_v.spt_v + idx_v.tail_in;
+  for (size_t i = 0; i < s_total; ++i)
+    if (ids[i] == -1) {
+      auto findIt = std::find(idx_v.spt_v, endIt, node[i]);
+      if (findIt != endIt) ids[i] = findIt - idx_v.spt_v;
+    }
 
   // Query pair-wise distance: node (len s) -> dist (s * s)
   vector<int> argnode(s_total);
@@ -597,25 +613,25 @@ FetchNode(const int s, vector<int> &node, vector<int> &dist){
   });
 
   tmp_node.clear();
+  tmp_ids.clear();
   tmp_node.emplace_back(node[argnode[s_total-1]]);
+  tmp_ids.emplace_back(ids[argnode[s_total-1]]);
   for (size_t j = 1; j < s_total; ++j) {
     mat[j].resize(s_total);
     mat[j][0] = mat0[j];
   }
 
   for (int i = s_total-2; i >= 0; --i) {
-    if (node[argnode[i]] == v) {
-      tmp_node.emplace_back(node[argnode[i]]);
-      continue;
-    }
+    tmp_node.emplace_back(node[argnode[i]]);
+    tmp_ids.emplace_back(ids[argnode[i]]);
+    if (node[argnode[i]] == v) continue;
     tmp_dist.clear();
-    QueryDistanceTri(node[argnode[i]], v, tmp_node, tmp_dist);
+    QueryDistanceTri(v, tmp_node, tmp_ids, tmp_dist);
     // mat[argnode[i]][argnode[i]] = 0;
     for (int j = s_total-1; j > i; --j) {
       mat[argnode[i]][argnode[j]] = tmp_dist[s_total-1 - j];
       mat[argnode[j]][argnode[i]] = tmp_dist[s_total-1 - j];
     }
-    tmp_node.emplace_back(node[argnode[i]]);
   }
   for (size_t i = 0; i < s_total; ++i) {
       // TODO: return global nodes
@@ -682,9 +698,10 @@ FetchParallel(const vector<int> &ns, vector<int> &node, vector<int> &dist){
 
 // ====================
 int PrunedLandmarkLabeling::
-Global(const int v, vector<int> &node, vector<int> &dist){
+Global(const int v, vector<int> &node, vector<int> &dist, vector<int> &ids){
   node.clear();
   dist.clear();
+  ids.clear();
   const index_t &idx_v = index_[v];
   _mm_prefetch(&idx_v.bpspt_d[0], _MM_HINT_T0);
   _mm_prefetch(&idx_v.bpspt_s[0][0], _MM_HINT_T0);
@@ -699,15 +716,17 @@ Global(const int v, vector<int> &node, vector<int> &dist){
       if (d == 0) d++;
       node.emplace_back(alias[V+i]);
       dist.emplace_back(d);
+      ids.emplace_back(-1);
     }
   }
   return node.size();
 }
 
 int PrunedLandmarkLabeling::
-Label(const int v, vector<int> &node, vector<int> &dist){
+Label(const int v, vector<int> &node, vector<int> &dist, vector<int> &ids){
   node.clear();
   dist.clear();
+  ids.clear();
   const index_t &idx_v = index_[v];
   _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
   _mm_prefetch(&idx_v.spt_d[0], _MM_HINT_T0);
@@ -716,14 +735,16 @@ Label(const int v, vector<int> &node, vector<int> &dist){
     if (idx_v.spt_d[i] == 0) continue;
     node.emplace_back(idx_v.spt_v[i]);
     dist.emplace_back(idx_v.spt_d[i]);
+    ids.emplace_back(i);
   }
   return node.size();
 }
 
 int PrunedLandmarkLabeling::
-InvLabel(const int v, vector<int> &node, vector<int> &dist){
+InvLabel(const int v, vector<int> &node, vector<int> &dist, vector<int> &ids){
   node.clear();
   dist.clear();
+  ids.clear();
   const index_t &idx_v = index_[v];
   _mm_prefetch(&idx_v.spt_v[idx_v.tail_out], _MM_HINT_T0);
   _mm_prefetch(&idx_v.spt_d[idx_v.tail_out], _MM_HINT_T0);
@@ -732,14 +753,16 @@ InvLabel(const int v, vector<int> &node, vector<int> &dist){
     if (idx_v.spt_d[i] == 0) continue;
     node.emplace_back(idx_v.spt_v[i]);
     dist.emplace_back(idx_v.spt_d[i]);
+    ids.emplace_back(i);
   }
   return node.size();
 }
 
 int PrunedLandmarkLabeling::
-SNeighbor(const int v, const int size, vector<int> &node, vector<int> &dist){
+SNeighbor(const int v, const int size, vector<int> &node, vector<int> &dist, vector<int> &ids){
   node.clear();
   dist.clear();
+  ids.clear();
 
   queue<uint32_t> node_que, dist_que;
   vector<bool> vis(V, false);
@@ -766,6 +789,7 @@ SNeighbor(const int v, const int size, vector<int> &node, vector<int> &dist){
         dist_que.push(d + 1);
         node.emplace_back(adj[u][i]);
         dist.emplace_back(d + 1);
+        ids.emplace_back(-1);
         vis[adj[u][i]] = true;
       }
     }
@@ -776,6 +800,7 @@ SNeighbor(const int v, const int size, vector<int> &node, vector<int> &dist){
         dist_que.push(d + 1);
         node.emplace_back(adj[u][i]);
         dist.emplace_back(d + 1);
+        ids.emplace_back(-1);
         vis[adj[u][i]] = true;
       }
     }
@@ -785,12 +810,17 @@ SNeighbor(const int v, const int size, vector<int> &node, vector<int> &dist){
 }
 
 int PrunedLandmarkLabeling::
-SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vector<int> &ret, vector<int> &ret2) {
+SampleSet(const int size,
+  const vector<int> &set, const vector<int> &set2, const vector<int> &set3,
+  vector<int> &ret, vector<int> &ret2, vector<int> &ret3) {
+
   if (set.size() <= size) {
     ret.insert (ret.end(),  std::make_move_iterator(set.begin()),
                             std::make_move_iterator(set.end()));
     ret2.insert(ret2.end(), std::make_move_iterator(set2.begin()),
                             std::make_move_iterator(set2.end()));
+    ret3.insert(ret3.end(), std::make_move_iterator(set3.begin()),
+                            std::make_move_iterator(set3.end()));
     return set.size();
   }
 
@@ -802,6 +832,7 @@ SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vecto
       usd[index] = true;
       ret.emplace_back(set[index]);
       ret2.emplace_back(set2[index]);
+      ret3.emplace_back(set3[index]);
       cnt++;
     }
   }
@@ -809,22 +840,21 @@ SampleSet(const int size, const vector<int> &set, const vector<int> &set2, vecto
 }
 
 // ====================
+// Query between nw[-1] and nw[0..sz-2] orienting r
 int PrunedLandmarkLabeling::
-QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &ret) {
-  const index_t &idx_v = index_[v];
+QueryDistanceTri(const int r, const vector<int> &nw, const vector<int> &ids, vector<int> &ret) {
+  const size_t sz = nw.size();
+  const int v = nw[sz-1];
+  const int iv = ids[sz-1];
   const index_t &idx_r = index_[r];
   const unordered_map<uint32_t, uint8_t> &dct_v = indexdct_[v];
-  _mm_prefetch(&idx_v.spt_v[0], _MM_HINT_T0);
-  _mm_prefetch(&idx_v.spt_d[0], _MM_HINT_T0);
-  _mm_prefetch(&idx_r.spt_v[0], _MM_HINT_T0);
-  _mm_prefetch(&idx_r.spt_d[0], _MM_HINT_T0);
-  auto endIt = idx_r.spt_v + idx_r.tail_in;
-  auto foundIt = std::find(idx_r.spt_v, endIt, v);
-  const int iv = (foundIt != endIt) ? (foundIt - idx_r.spt_v) : -1;
   const uint64_t s_rv0 = (iv != -1) ? idx_r.spt_s[iv].first : 0;
   const uint64_t s_rv1 = (iv != -1) ? idx_r.spt_s[iv].second : 0;
 
-  for (size_t j = 0; j < nw.size(); ++j) {
+  _mm_prefetch(&idx_r.spt_v[0], _MM_HINT_T0);
+  _mm_prefetch(&idx_r.spt_d[0], _MM_HINT_T0);
+
+  for (size_t j = 0; j < sz-1; ++j) {
     const int w = nw[j];
     if (w >= v) {
       ret[j] = 0;
@@ -838,8 +868,7 @@ QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &r
     }
 
     uint8_t d = INF8;
-    auto foundIt = std::find(idx_r.spt_v, endIt, w);
-    const int iw = (foundIt != endIt) ? (foundIt - idx_r.spt_v) : -1;
+    const int iw = ids[j];
     if (iv != -1 && iw != -1) {
       d = idx_r.spt_d[iv] + idx_r.spt_d[iw]
         + ((s_rv0 & idx_r.spt_s[iw].first) ? -2 :
@@ -851,7 +880,7 @@ QueryDistanceTri(const int v, const int r, const vector<int> &nw, vector<int> &r
 
     ret[j] = d;
   }
-  return nw.size();
+  return sz;
 }
 
 int PrunedLandmarkLabeling::

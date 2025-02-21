@@ -155,10 +155,10 @@ if __name__ == '__main__':
     # print(batch.ids.numpy()[0, :])
     # print(batch.attn_bias.numpy()[0, :, :, 0])
     logger.log(logging.LTRN, f'Batch time: {timer}')
-    # with utils.Stopwatch() as timer:
-    #     for batch in loader['val']:
-    #         pass
-    # logger.log(logging.LTRN, f'Full time: {timer}')
+    with utils.Stopwatch() as timer:
+        for batch in loader['val']:
+            pass
+    logger.log(logging.LTRN, f'Full time: {timer}')
 
 # Avg Label size: 2.28088 + 0.599573 + 0.783166
 # Avg 2-hop size: 3.30724 (0, 0.322819, 0.320093, 0.161215, 0.118769, 0.0771028, 0)

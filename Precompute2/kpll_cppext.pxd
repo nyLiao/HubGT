@@ -18,6 +18,3 @@ cdef extern from "ppll.h":
         int QueryDistanceParallel(vector[int] &, vector[int] &, vector[int] &)
         int FetchNode(int, vector[int] &, vector[int] &)
         int FetchParallel(vector[int] &, vector[int] &, vector[int] &)
-        int Global(int, vector[int] &, vector[int] &)
-        int Label(int, vector[int] &, vector[int] &)
-        int SNeighbor(int, int, vector[int] &, vector[int] &)

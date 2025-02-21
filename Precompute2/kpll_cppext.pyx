@@ -63,21 +63,3 @@ cdef class PyPLL:
         dist = np.empty(ns.shape[0] * n_fetch * n_fetch, dtype=np.int32)
         self.c_pll.FetchParallel(ns, nodes, dist)
         return nodes, dist
-
-    def glabel(self, int v):
-        cdef vector[int] nodes
-        cdef vector[int] dist
-        length = self.c_pll.Global(v, nodes, dist)
-        return nodes, dist, length
-
-    def label(self, int v):
-        cdef vector[int] nodes
-        cdef vector[int] dist
-        length = self.c_pll.Label(v, nodes, dist)
-        return nodes, dist, length
-
-    def s_neighbor(self, int v, int size):
-        cdef vector[int] nodes
-        cdef vector[int] dist
-        length = self.c_pll.SNeighbor(v, size, nodes, dist)
-        return nodes, dist, length
