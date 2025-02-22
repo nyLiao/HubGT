@@ -4,8 +4,6 @@ import logging
 from tqdm import tqdm
 from functools import partial
 import numpy as np
-import scipy.sparse as sp
-from multiprocessing import Pool
 
 import torch
 from torch.utils.data import DataLoader
@@ -21,58 +19,6 @@ N_BPROOT = 128
 np.set_printoptions(linewidth=160, edgeitems=50, threshold=20,
                     formatter=dict(float=lambda x: "% 9.3e" % x))
 torch.set_printoptions(linewidth=160, edgeitems=50)
-
-
-def choice_cap(a: list, size: int, nsample: int, p: np.ndarray=None):
-    if size == 0:
-        return
-    if len(a) <= size:
-        return np.tile(a, (nsample, 1))
-    p = p / np.sum(p)
-    ret = [np.random.choice(a, size, replace=False, p=p) for _ in range(nsample)]
-    return np.vstack(ret)
-
-
-def callback_sample(ids, pbar, ret):
-    pbar.update(1)
-    ego, ids_i = ret
-    ids[ego] = ids_i
-
-
-def aggr_sample(ego, ziplst, **args):
-    # Sample neighbors
-    ids_i = np.full((args['ns'], args['ss']), ego, dtype=np.int32)
-    s_top = 1
-    for nodes, val, r, s in ziplst:
-        if s == 0:
-            continue
-        val = np.asarray(val) ** r
-        val = np.nan_to_num(val, posinf=0)
-        ids_i[:, s_top:s_top+s] = choice_cap(nodes, s, args['ns'], val)
-        s_top += s
-    return ego, ids_i
-
-
-def aggr_csr(ids_chunk, num_nodes):
-    # Dense connection in each subgraph
-    spd = sp.csr_matrix((num_nodes, num_nodes), dtype=int,)
-    for ids_i in ids_chunk:
-        indices_i = []
-        for ids_s in ids_i:
-            subset = np.unique(ids_s)
-            s_row, s_col = np.triu_indices(len(subset), 1)
-            s_row, s_col = subset[s_row], subset[s_col]
-            indices_i.append(np.vstack([s_row, s_col]))
-        indices_i = np.hstack(indices_i)
-        mask = (indices_i[0] < indices_i[1])
-        indices_i = indices_i[:, mask]
-        values_i = np.ones_like(indices_i[0], dtype=int)
-        spd += sp.coo_matrix(
-            (values_i, indices_i),
-            shape=(num_nodes, num_nodes),
-        ).tocsr()
-    spd.sum_duplicates()
-    return spd
 
 
 def process_data(args, res_logger=utils.ResLogger()):
@@ -96,11 +42,12 @@ def process_data(args, res_logger=utils.ResLogger()):
 
     # ===== Build label
     py_pll = PyPLL()
+    seed = args.seed if isinstance(args.seed, int) else args.seed[0]
+    quiet = (args.loglevel > 10)
+    py_pll.set_args(quiet, seed, args.ss, args.s0g, args.s0, args.s1)
     # time_index = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
     time_index = py_pll.get_index(
         edge_index, np.flip(id_map), str(args.logpath.parent), args.index, args.quiet)
-    seed = args.seed if isinstance(args.seed, int) else args.seed[0]
-    py_pll.set_args(args.quiet, seed, args.ss, args.s0g, args.s0, args.s1)
     logger.log(logging.LTRN, f'Index time: {time_index:.2f}')
     del edge_index, data.edge_index, deg
     data.edge_index = None
@@ -122,7 +69,7 @@ def process_data(args, res_logger=utils.ResLogger()):
         loader[split] = DataLoader(
             pyg_utils.mask_to_index(mask),
             batch_size=args.batch,
-            num_workers=(0 if num_nodes < 5e4 else 4),
+            num_workers=(1 if num_nodes < 5e4 else args.num_workers),
             shuffle=shuffle,
             collate_fn=partial(collate_fetch,
                 c_handler=py_pll, graph=graph, s_total=args.ss, std=std,)

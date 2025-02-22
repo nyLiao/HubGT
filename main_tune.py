@@ -1,4 +1,5 @@
 import os
+import uuid
 import logging
 import optuna
 from copy import deepcopy
@@ -22,16 +23,16 @@ def objective(trial, args, logger, res_logger):
     res_logger = deepcopy(res_logger)
     args = deepcopy(args)
     # args.perturb_std = trial.suggest_float('perturb_std', 0.0, 0.05, step=0.001)
-    # args.aggr_output = trial.suggest_int('aggr_output', 0, 1)
-    # args.var_vfeat = trial.suggest_int('var_vfeat', 0, 1)
+    args.aggr_output = trial.suggest_int('aggr_output', 0, 1)
+    args.var_vfeat = trial.suggest_int('var_vfeat', 0, 1)
     # args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
     # args.ns = trial.suggest_int('ns', 2, 8, step=2)
-    args.s0 = trial.suggest_int('s0', 0, 36, step=2)
-    args.s0g = trial.suggest_int('s0g', 0, 12, step=2)
+    args.s0 = trial.suggest_int('s0', 0, 24, step=2)
+    args.s0g = trial.suggest_int('s0g', 0, 10, step=2)
     args.s1 = trial.suggest_int('s1', 0, 12, step=2)
-    args.r0 = trial.suggest_float('r0', -4.0, 2.0, step=0.2)
-    args.r0 = trial.suggest_float('r0g', -4.0, 2.0, step=0.2)
-    args.r1 = trial.suggest_float('r1', -4.0, 2.0, step=0.2)
+    # args.r0 = trial.suggest_float('r0', -4.0, 2.0, step=0.2)
+    # args.r0g = trial.suggest_float('r0g', -4.0, 2.0, step=0.2)
+    # args.r1 = trial.suggest_float('r1', -4.0, 2.0, step=0.2)
     for k in trial.params:
         res_logger.concat([(k, trial.params[k])])
     logger.log(logging.LTRN, trial.params)
@@ -141,16 +142,19 @@ def main(args):
 
     study_path = '-'.join(filter(None, ['optuna', args.suffix])) + '.db'
     study_path, _ = utils.setup_logpath(folder_args=(study_path,))
+    study_name = '/'.join(str(args.logpath).split('/')[-2:-1])
+    study_id = '/'.join((study_name, str(args.seed)))
+    study_id = uuid.uuid5(uuid.NAMESPACE_DNS, study_id).int % 2**32
     study = optuna.create_study(
-        study_name=args.logid,
+        study_name=study_name,
         storage=optuna.storages.RDBStorage(
             url=f'sqlite:///{str(study_path)}',
             heartbeat_interval=3600),
         direction='maximize',
         sampler=optuna.samplers.TPESampler(
-            n_startup_trials=min(8, args.n_trials // 5),
+            n_startup_trials=min(6, args.n_trials // 5),
             n_ei_candidates=24,
-            seed=args.seed_tune,
+            seed=study_id,
             multivariate=True,
             group=True,
             warn_independent_sampling=False),
@@ -177,6 +181,7 @@ if __name__ == "__main__":
     args = utils.setup_args(parser)
 
     seed_lst = args.seed.copy()
+    args.n_trials = args.n_trials // len(seed_lst)
     for seed in seed_lst:
         args.seed = utils.setup_seed(seed, args.cuda)
         args.flag = f'param'
