@@ -45,7 +45,6 @@ def process_data(args, res_logger=utils.ResLogger()):
     seed = args.seed if isinstance(args.seed, int) else args.seed[0]
     quiet = (args.loglevel > 10)
     py_pll.set_args(quiet, seed, args.ss, args.s0g, args.s0, args.s1)
-    # time_index = py_pll.construct_index(edge_index, args.kindex, not undirected, args.quiet)
     time_index = py_pll.get_index(
         edge_index, np.flip(id_map), str(args.logpath.parent), args.index, args.quiet)
     logger.log(logging.LTRN, f'Index time: {time_index:.2f}')
@@ -69,7 +68,9 @@ def process_data(args, res_logger=utils.ResLogger()):
         loader[split] = DataLoader(
             pyg_utils.mask_to_index(mask),
             batch_size=args.batch,
-            num_workers=(0 if num_nodes < 5e4 else args.num_workers),
+            # BUG: DataLoader worker is killed by signal: Segmentation fault
+            num_workers=0,
+            # num_workers=(1 if num_nodes < 5e4 else args.num_workers),
             shuffle=shuffle,
             collate_fn=partial(collate_fetch,
                 c_handler=py_pll, graph=graph, s_total=args.ss, std=std,)
@@ -99,25 +100,8 @@ if __name__ == '__main__':
     loader = process_data(args)
     with utils.Stopwatch() as timer:
         batch = next(iter(loader['val']))
-    # print(batch.ids.numpy()[0, :])
-    # print(batch.attn_bias.numpy()[0, :, :, 0])
     logger.log(logging.LTRN, f'Batch time: {timer}')
     with utils.Stopwatch() as timer:
         for batch in loader['val']:
             pass
     logger.log(logging.LTRN, f'Full time: {timer}')
-
-# Avg Label size: 2.28088 + 0.599573 + 0.783166
-# Avg 2-hop size: 3.30724 (0, 0.322819, 0.320093, 0.161215, 0.118769, 0.0771028, 0)
-# Index time: 0.03
-# [   3 1409 3172 1409 3172   64 1220 1526    3 1409]
-# [[0 1 1 1 1 2 2 3 0 1]
-#  [1 0 2 0 2 1 1 2 1 0]
-#  [1 2 0 2 0 3 1 2 1 2]
-#  [1 0 2 0 2 1 1 2 1 0]
-#  [1 2 0 2 0 3 1 2 1 2]
-#  [2 1 3 1 3 0 2 3 2 1]
-#  [2 1 1 1 1 2 0 1 2 1]
-#  [3 2 2 2 2 3 1 0 3 2]
-#  [0 1 1 1 1 2 2 3 0 1]
-#  [1 0 2 0 2 1 1 2 1 0]]

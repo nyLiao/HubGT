@@ -25,7 +25,22 @@ cdef class PyPLL:
                 self.store_index(path_cache)
             return res
         else:
-            return 1.0 - self.load_index(path_cache)
+            try:
+                res = 1.0 - self.load_index(path_cache)
+                if res < 0.0:
+                    ns, nt = edge_index
+                    self.c_pll.ConstructGraph(ns, nt, alias_inv)
+                    res = self.c_pll.ConstructIndex()
+                    if not quiet:
+                        self.store_index(path_cache)
+                return res
+            except:
+                ns, nt = edge_index
+                self.c_pll.ConstructGraph(ns, nt, alias_inv)
+                res = self.c_pll.ConstructIndex()
+                if not quiet:
+                    self.store_index(path_cache)
+                return res
 
     def construct_index(self, np.ndarray[uint32_t, ndim=2] edge_index, np.ndarray[uint32_t, ndim=1] alias_inv):
         ns, nt = edge_index

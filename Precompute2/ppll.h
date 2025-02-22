@@ -577,6 +577,7 @@ FetchNode(const int s, vector<int> &node, vector<int> &dist){
   vector<int> ids(4*MAXIDX), tmp_ids(4*MAXIDX);
   vector<vector<int>> mat(NUM_FETCH, vector<int>{});
   vector<int> &mat0 = mat[0];
+  queue<pair<int, uint32_t>> que_global;
 
   // Construct sample
   node.clear();
@@ -600,11 +601,16 @@ FetchNode(const int s, vector<int> &node, vector<int> &dist){
   s_total += s_adj + 1;
 
   auto endIt = idx_v.spt_v + idx_v.tail_in;
-  for (size_t i = 0; i < s_total; ++i)
+  for (size_t i = 0; i < s_total; ++i){
+    if (node[i] >= V) {
+      que_global.push(std::make_pair(i, node[i]));
+      node[i] = alias[node[i]];
+    }
     if (ids[i] == -1) {
       auto findIt = std::find(idx_v.spt_v, endIt, node[i]);
       if (findIt != endIt) ids[i] = findIt - idx_v.spt_v;
     }
+  }
 
   // Query pair-wise distance: node (len s) -> dist (s * s)
   vector<int> argnode(s_total);
@@ -635,8 +641,12 @@ FetchNode(const int s, vector<int> &node, vector<int> &dist){
     }
   }
   for (size_t i = 0; i < s_total; ++i) {
-      // TODO: return global nodes
       node[i] = alias_inv[node[i]];
+  }
+  while (!que_global.empty()) {
+    auto p = que_global.front();
+    que_global.pop();
+    node[p.first] = p.second;
   }
 
   // Align to output
@@ -715,7 +725,7 @@ Global(const int v, vector<int> &node, vector<int> &dist, vector<int> &ids){
       d = td;
       if ((d == 0) && (V+i == v)) break;
       if (d == 0) d++;
-      node.emplace_back(alias[V+i]);
+      node.emplace_back(V+i);
       dist.emplace_back(d);
       ids.emplace_back(-1);
     }

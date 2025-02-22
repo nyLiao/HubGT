@@ -27,9 +27,9 @@ def objective(trial, args, logger, res_logger):
     args.var_vfeat = trial.suggest_int('var_vfeat', 0, 1)
     # args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
     # args.ns = trial.suggest_int('ns', 2, 8, step=2)
-    args.s0 = trial.suggest_int('s0', 0, 24, step=2)
-    args.s0g = trial.suggest_int('s0g', 0, 10, step=2)
-    args.s1 = trial.suggest_int('s1', 0, 12, step=2)
+    args.s0 = trial.suggest_int('s0', 0, 20, step=2)
+    args.s0g = trial.suggest_int('s0g', 0, 8, step=2)
+    args.s1 = trial.suggest_int('s1', 0, 20, step=2)
     # args.r0 = trial.suggest_float('r0', -4.0, 2.0, step=0.2)
     # args.r0g = trial.suggest_float('r0g', -4.0, 2.0, step=0.2)
     # args.r1 = trial.suggest_float('r1', -4.0, 2.0, step=0.2)
@@ -130,7 +130,7 @@ def objective(trial, args, logger, res_logger):
     logger.info(f"[args]: {args}")
     logger.log(logging.LRES, f"[res]: {res_logger}")
     res_logger.save()
-    trial.set_user_attr("s_test", res_logger._get(col=args.metric+'_test', row=0))
+    trial.set_user_attr("s_test", float(res_logger._get(col=args.metric+'_test', row=0)))
     return res_logger.data.loc[0, args.metric+'_val']
 
 
