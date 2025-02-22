@@ -158,9 +158,10 @@ float PrunedLandmarkLabeling::
 ConstructIndex() {
   double time_neighbor, time_search, time_two;
   if (!quiet) cout << "Building index -- Nodes: " << V << ", Edges: " << E << endl;
+  Init();
+  indexdct_.resize(V);
 
   // Bit-parallel labeling
-  Init();
   time_neighbor = -GetCurrentTimeSec();
   vector<bool> usd(V, false);  // Used as root? (in new label)
   vector<pair<uint64_t, uint64_t> > tmp_s(V+1);
@@ -979,6 +980,32 @@ void read_vector(std::ifstream& ifs, vector<T>& data){
 	ifs.read(reinterpret_cast<char*>(&data[0]), count * sizeof(T));
 }
 
+template<typename T> inline
+void write_umap(std::ofstream& ofs, const unordered_map<uint32_t, T>& umap) {
+	const size_t count = umap.size();
+	ofs.write(reinterpret_cast<const char*>(&count), sizeof(size_t));
+  for (auto const& p : umap) {
+    ofs.write(reinterpret_cast<const char*>(&p.first), sizeof(uint32_t));
+    ofs.write(reinterpret_cast<const char*>(&p.second), sizeof(T));
+  }
+}
+
+template<typename T> inline
+unordered_map<uint32_t, T> read_umap(std::ifstream& ifs) {
+  unordered_map<uint32_t, T> umap;
+  size_t count;
+  ifs.read(reinterpret_cast<char*>(&count), sizeof(size_t));
+  umap.reserve(count);
+  for (size_t j = 0; j < count; ++j) {
+    uint32_t key;
+    T value;
+    ifs.read(reinterpret_cast<char*>(&key), sizeof(uint32_t));
+    ifs.read(reinterpret_cast<char*>(&value), sizeof(T));
+    umap.emplace(key, value);
+  }
+  return umap;
+}
+
 bool PrunedLandmarkLabeling::
 StoreIndex(const char *filename) {
   if (!quiet) cout << "Saving index -- " << filename << endl;
@@ -1010,7 +1037,13 @@ StoreIndex(std::ofstream &ofs) {
     for (uint32_t i = 0; i < idx.tail_in; ++i) {
       WRITE_BINARY(idx.spt_v[i]);
       WRITE_BINARY(idx.spt_d[i]);
+      WRITE_BINARY(idx.spt_s[i].first);
+      WRITE_BINARY(idx.spt_s[i].second);
     }
+  }
+
+  for (size_t v = 0; v < V; ++v) {
+    write_umap(ofs, indexdct_[v]);
   }
 
   return ofs.good();
@@ -1049,12 +1082,21 @@ LoadIndex(std::ifstream &ifs) {
     READ_BINARY(idx.tail_in);
     idx.spt_v = (uint32_t*)memalign(64, idx.tail_in * sizeof(uint32_t));
     idx.spt_d = (uint8_t *)memalign(64, idx.tail_in * sizeof(uint8_t ));
+    idx.spt_s = (pair<uint64_t, uint64_t>*)memalign(64, idx.tail_in * sizeof(pair<uint64_t, uint64_t>));
     for (uint32_t i = 0; i < idx.tail_in; ++i) {
       READ_BINARY(idx.spt_v[i]);
       READ_BINARY(idx.spt_d[i]);
+      READ_BINARY(idx.spt_s[i].first);
+      READ_BINARY(idx.spt_s[i].second);
     }
   }
 
+  indexdct_.resize(V);
+  for (size_t v = 0; v < V; ++v) {
+    indexdct_[v] = read_umap<uint8_t>(ifs);
+  }
+
+  if (!quiet) AverageLabelSize();
   return ifs.good();
 }
 
@@ -1068,25 +1110,29 @@ Init() {
   for (size_t v = 0; v < V; ++v) {
     index_[v].spt_v = NULL;
     index_[v].spt_d = NULL;
+    index_[v].spt_s = NULL;
   }
   srand(SEED);
-  indexdct_.resize(V);
 }
 
 void PrunedLandmarkLabeling::
 Free() {
   alias.clear();
   alias_inv.clear();
-  for (size_t v = 0; v < V; ++v) {
-    adj[v].clear();
+  for (auto &adjv : adj) {
+    adjv.clear();
   }
 
   for (size_t v = 0; v < V; ++v) {
     free(index_[v].spt_v);
     free(index_[v].spt_d);
+    free(index_[v].spt_s);
   }
   free(index_);
   index_ = NULL;
+  for (auto &m : indexdct_) {
+    m.clear();
+  }
   indexdct_.clear();
   V = 0;
   E = 0;

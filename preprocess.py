@@ -69,7 +69,7 @@ def process_data(args, res_logger=utils.ResLogger()):
         loader[split] = DataLoader(
             pyg_utils.mask_to_index(mask),
             batch_size=args.batch,
-            num_workers=(1 if num_nodes < 5e4 else args.num_workers),
+            num_workers=(0 if num_nodes < 5e4 else args.num_workers),
             shuffle=shuffle,
             collate_fn=partial(collate_fetch,
                 c_handler=py_pll, graph=graph, s_total=args.ss, std=std,)
