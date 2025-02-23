@@ -60,6 +60,8 @@ class SingleGraphLoader(object):
         if self.data in ['genius', 'pokec', 'snap-patents', 'twitch-gamer', 'wiki']:
             if hasattr(data, 'train_mask') and hasattr(self, 'data_split'):
                 del self.data_split
+                if isinstance(self.split_idx, int):
+                    self.split_idx = [self.split_idx]
                 self.split_idx = self.split_idx[0]
 
         if hasattr(self, 'data_split'):

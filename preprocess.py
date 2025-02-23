@@ -4,6 +4,7 @@ import logging
 from tqdm import tqdm
 from functools import partial
 import numpy as np
+import multiprocessing as mp
 
 import torch
 from torch.utils.data import DataLoader
@@ -61,6 +62,11 @@ def process_data(args, res_logger=utils.ResLogger()):
     graph = Data(x=x, y=y, num_nodes=num_nodes)
     graph.contiguous('x', 'y')
 
+    try:
+        mp.set_start_method('spawn')
+    except RuntimeError:
+        pass
+    num_workers = (1 if num_nodes < 2e4 else args.num_workers)
     for split in ['train', 'val', 'test']:
         mask = getattr(data, f'{split}_mask')
         shuffle = {'train': True, 'val': False, 'test': False}[split]
@@ -68,12 +74,13 @@ def process_data(args, res_logger=utils.ResLogger()):
         loader[split] = DataLoader(
             pyg_utils.mask_to_index(mask),
             batch_size=args.batch,
-            # BUG: DataLoader worker is killed by signal: Segmentation fault
-            num_workers=0,
-            # num_workers=(1 if num_nodes < 5e4 else args.num_workers),
             shuffle=shuffle,
             collate_fn=partial(collate_fetch,
-                c_handler=py_pll, graph=graph, s_total=args.ss, std=std,)
+                c_handler=py_pll, graph=graph, s_total=args.ss, std=std,),
+            num_workers=num_workers,
+            persistent_workers=True if num_workers else False,
+            prefetch_factor=2 if num_workers else None,
+            pin_memory=False,
         )
         s += f'{split}: {mask.sum().item()}, '
     logger.log(logging.LTRN, s)

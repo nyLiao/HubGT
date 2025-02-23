@@ -73,7 +73,7 @@ def setup_argparse():
     parser.add_argument('-b', '--batch', type=int, default=1024)
     parser.add_argument('--data_split', type=str, default='60/20/20', help='Index or percentage of dataset split')
     parser.add_argument('--multi', action='store_true', help='True for multi-label classification')
-    parser.add_argument('--num_workers', type=int, default=8, help='number of loader workers')
+    parser.add_argument('--num_workers', type=int, default=4, help='number of loader workers')
     parser.add_argument('--perturb_std', type=float, default=0.0, help='perturb for training data')
     parser.add_argument('--pre_collate', type=int, default=1)       # bool
     # Precompute configuration
