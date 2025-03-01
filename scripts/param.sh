@@ -14,8 +14,6 @@ ARGS_S=(
 PARAM="s0"
 VALS=("6" "12" "18" "24" "30" "36" "42")
 
-# main: ogbn-mag, reddit, ogbn-products, penn94, genius, twitch-gamer,
-# appendix: cora, citeseer, pubmed, cs, physic, chameleon_filter, squirrel_filter
 DATAS=("citeseer")
 for data in ${DATAS[@]}; do
     for val in ${VALS[@]}; do

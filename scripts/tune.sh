@@ -9,8 +9,8 @@ ARGS_P=(
     "--patience" "30"
 )
 
-# main: ogbn-mag, reddit, ogbn-products, penn94, genius, twitch-gamer,
-# appendix: cora, citeseer, pubmed, cs, physics, chameleon_filtered, squirrel_filtered, tolokers
+# main: physics, ogbn-mag, reddit, ogbn-arxiv, penn94, genius, twitch-gamer, pokec
+# appendix: cora, citeseer, pubmed, cs, chameleon_filtered, squirrel_filtered, tolokers, flickr
 DATAS=("pubmed" "physics")
 for data in ${DATAS[@]}; do
     python main_tune.py --data $data "${ARGS_P[@]}"

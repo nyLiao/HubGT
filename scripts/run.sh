@@ -6,12 +6,12 @@ ARGS_S=(
     "--seed" "$SEED_S"
     "--seed_tune" "$SEED_P"
     "--loglevel" "25"
-    "--epoch" "200"
-    "--patience" "100"
+    "--epoch" "300"
+    "--patience" "50"
 )
 
-# main: ogbn-mag, reddit, ogbn-products, penn94, genius, twitch-gamer,
-# appendix: cora, citeseer, pubmed, cs, physic, chameleon_filter, squirrel_filter
+# main: physics, ogbn-mag, reddit, ogbn-arxiv, penn94, genius, twitch-gamer, pokec
+# appendix: cora, citeseer, pubmed, cs, chameleon_filtered, squirrel_filtered, tolokers, flickr
 DATAS=("physics")
 for data in ${DATAS[@]}; do
     python main.py --data $data "${ARGS_S[@]}"

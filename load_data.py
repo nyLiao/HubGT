@@ -18,7 +18,7 @@ from dataset_process import RemoveSelfLoops, load_import, idx2mask, split_random
 from dataset_process.linkx import T_arxiv_year, T_ogbn_mag
 
 
-DATAPATH = Path('/share/data/dataset')
+DATAPATH = Path('./data')
 
 
 class SingleGraphLoader(object):
