@@ -57,7 +57,7 @@ class SingleGraphLoader(object):
 
     # ===== Data processing
     def _resolve_split(self, dataset: Dataset, data: Data) -> None:
-        if self.data in ['genius', 'pokec', 'snap-patents', 'twitch-gamer', 'wiki']:
+        if self.data in ['snap-patents', 'twitch-gamer', 'wiki', 'reddit']:
             if hasattr(data, 'train_mask') and hasattr(self, 'data_split'):
                 del self.data_split
                 if isinstance(self.split_idx, int):
@@ -149,6 +149,8 @@ class SingleGraphLoader(object):
                 self.metric = 's_auroc'
             else:
                 self.metric = 's_f1i'
+            if self.data in ['ogbn-arxiv']:
+                kwargs['transform'].transforms = kwargs['transform'].transforms[:-1]
         elif self.data in ['arxiv-year']:
             module_name = 'ogb.nodeproppred'
             class_name = 'PygNodePropPredDataset'
@@ -166,13 +168,14 @@ class SingleGraphLoader(object):
                 name=self.data,
                 transform=self.transform,)
             self.split_idx = self.seed
-            # if self.data in ['genius', 'twitch-gamer']:
-            #     self.metric = 's_auroc'
-            # else:
-            #     self.metric = 's_f1i'
-            self.metric = 's_f1i'
+            if self.data in ['genius']:
+                self.metric = 's_auroc'
+            else:
+                self.metric = 's_f1i'
             if self.data not in ['snap-patents']:
                 kwargs['transform'] = self._T_insert(T.ToUndirected(), index=0)
+            if self.data in ['pokec', 'genius']:
+                kwargs['transform'].transforms = kwargs['transform'].transforms[:-1]
         elif self.data in ['penn94', 'amherst41', 'cornell5', 'johns_hopkins55', 'reed98']:
             module_name = 'dataset_process'
             class_name = 'FB100'
@@ -223,10 +226,13 @@ class SingleGraphLoader(object):
             }
             if self.data in pyg_mapping:
                 class_name = pyg_mapping[self.data]
+                if self.data in ['physics', 'cs']:
+                    kwargs['transform'].transforms = kwargs['transform'].transforms[:-1]
             elif self.data in ["flickr", "reddit", "actor"]:
                 class_name = self.data.capitalize()
                 kwargs['root'] = kwargs['root'].joinpath(class_name)
                 kwargs.pop('name')
+                kwargs['transform'].transforms = kwargs['transform'].transforms[:-1]
             else:
                 raise ValueError(f"Dataset '{self}' not found.")
             self.metric = 's_f1i'

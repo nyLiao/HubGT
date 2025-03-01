@@ -1,4 +1,6 @@
 import os
+import gc
+import uuid
 import json
 import logging
 import optuna
@@ -81,13 +83,13 @@ def main(args):
     res_logger = ResLogger(quiet=False, suffix=args.suffix)
     res_logger.concat([('seed', args.seed), ('param', getattr(args, args.suffix))])
     for k in ["s0", "s0g", "s1"]:
-        setattr(args, k, round(getattr(args, k) * args.ss / 32.))
-    if args.suffix == 's0':
-        args.s0g = args.s0 // 3
-        args.s1 = 31 - args.s0 - args.s0g
-    if args.suffix == 's1':
-        args.s0g = (32 - args.s1) // 4
-        args.s0 = 31 - args.s1 - args.s0g
+        setattr(args, k, round(getattr(args, k) * args.ss / 48.))
+    if args.suffix == 's0' and (args.s0 + args.s0g + args.s1 > args.ss - 3):
+        # args.s0g = args.s0 // 3
+        args.s1 = min(args.ss - 2 - args.s0 - args.s0g, args.s0 // 2)
+    # if args.suffix == 's1':
+    #     args.s0g = (args.ss - args.s1) // 4
+    #     args.s0 = args.ss - 1 - args.s1 - args.s0g
     print(f' > {args.suffix}: {getattr(args, args.suffix)}')
 
     # ========== Load data
@@ -166,6 +168,8 @@ def main(args):
     ], suffix='learn')
 
     # ========== Run testing
+    del loader['train'], loader['val']
+    gc.collect()
     model = ckpt_logger.load('best', model=model)
     res_test = eval(args, model, args.device, loader['test'], evaluator['test'])
     res_logger.merge(res_test)
@@ -187,28 +191,23 @@ if __name__ == "__main__":
     args = utils.setup_args(parser)
 
     if args.seed_tune is not None:
-        study_path, _ = utils.setup_logpath(folder_args=('optuna.db',))
         logpath, logid = utils.setup_logpath(
-            folder_args=(args.data, f'param'),
+            folder_args=(args.data, 'param'),
             quiet=True)
         if os.path.exists(logpath.joinpath('config.json')):
             with open(logpath.joinpath('config.json'), 'r') as config_file:
                 best_params = json.load(config_file)
         else:
+            study_path, _ = utils.setup_logpath(folder_args=('optuna.db',))
+            study_name = '/'.join(str(args.logpath).split('/')[-2:-1])
+            study_id = '/'.join((study_name, str(args.seed)))
+            study_id = uuid.uuid5(uuid.NAMESPACE_DNS, study_id).int % 2**32
             print(f"Saving to {logpath}.")
             study = optuna.create_study(
-                study_name=logid,
-                storage=optuna.storages.RDBStorage(
-                    url=f'sqlite:///{str(study_path)}',
-                    heartbeat_interval=3600),
+                study_name=study_id,
+                storage=f'sqlite:///{str(study_path)}',
                 direction='maximize',
-                sampler=optuna.samplers.TPESampler(
-                    n_startup_trials=8,
-                    n_ei_candidates=36,
-                    seed=args.seed_tune,
-                    multivariate=True,
-                    group=True,
-                    warn_independent_sampling=False),
+                sampler=optuna.samplers.TPESampler(),
                 pruner=optuna.pruners.HyperbandPruner(
                     min_resource=2,
                     max_resource=args.epoch,
@@ -225,7 +224,7 @@ if __name__ == "__main__":
         args.seed = utils.setup_seed(seed, args.cuda)
         args.flag = '-'.join(filter(None, [str(args.seed), args.suffix]))
         args.logpath, args.logid = utils.setup_logpath(
-            folder_args=(args.data, "param", args.flag),
+            folder_args=(args.data, "param"+args.flag),
             quiet=args.quiet)
 
         main(args)

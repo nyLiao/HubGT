@@ -1,4 +1,6 @@
 import os
+import gc
+import uuid
 import json
 import logging
 import optuna
@@ -157,6 +159,8 @@ def main(args):
     ], suffix='learn')
 
     # ========== Run testing
+    del loader['train'], loader['val']
+    gc.collect()
     model = ckpt_logger.load('best', model=model)
     res_test = eval(args, model, args.device, loader['test'], evaluator['test'])
     res_logger.merge(res_test)
@@ -179,17 +183,20 @@ if __name__ == "__main__":
     args = utils.setup_args(parser)
 
     if args.seed_tune is not None:
-        study_path, _ = utils.setup_logpath(folder_args=('optuna.db',))
         logpath, logid = utils.setup_logpath(
-            folder_args=(args.data, f'{args.seed_tune}-param'),
+            folder_args=(args.data, 'param'),
             quiet=True)
         if os.path.exists(logpath.joinpath('config.json')):
             with open(logpath.joinpath('config.json'), 'r') as config_file:
                 best_params = json.load(config_file)
         else:
+            study_path, _ = utils.setup_logpath(folder_args=('optuna.db',))
+            study_name = '/'.join(str(args.logpath).split('/')[-2:-1])
+            study_id = '/'.join((study_name, str(args.seed)))
+            study_id = uuid.uuid5(uuid.NAMESPACE_DNS, study_id).int % 2**32
             print(f"Saving to {logpath}.")
             study = optuna.create_study(
-                study_name=logid,
+                study_name=study_id,
                 storage=f'sqlite:///{str(study_path)}',
                 direction='maximize',
                 sampler=optuna.samplers.TPESampler(),

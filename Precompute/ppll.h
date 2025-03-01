@@ -291,7 +291,7 @@ ConstructIndex() {
         if (!vis[v]) {
           tmp_d[v] = 1;
           tmp_s[v].first = 1ULL << nns;
-          if (++nns == MAXIDX) break;
+          if (++nns == 64) break;
         }
       }
 
@@ -411,6 +411,7 @@ ConstructIndex() {
     time_two = -GetCurrentTimeSec();
     ConstructTwoHopParallel(tmp_out, tmp_inv, tmp_tri);
     time_two += GetCurrentTimeSec();
+    if (!quiet) cout << "| Two-hop time: " << time_two << endl;
 
     for (size_t v = 0; v < V; ++v) {
       const size_t sz_out = tmp_out[v].first.size();
@@ -431,16 +432,15 @@ ConstructIndex() {
         index_[v].spt_s[i].second = tmp_tri[v].second[i];
       }
 
-      tmp_out[v].first.clear();
-      tmp_out[v].second.clear();
-      tmp_inv[v].first.clear();
-      tmp_inv[v].second.clear();
-      tmp_tri[v].first.clear();
-      tmp_tri[v].second.clear();
+      tmp_out[v].first.clear(); vector<uint32_t>().swap(tmp_out[v].first);
+      tmp_out[v].second.clear(); vector<uint8_t>().swap(tmp_out[v].second);
+      tmp_inv[v].first.clear(); vector<uint32_t>().swap(tmp_inv[v].first);
+      tmp_inv[v].second.clear(); vector<uint8_t>().swap(tmp_inv[v].second);
+      tmp_tri[v].first.clear(); vector<uint64_t>().swap(tmp_tri[v].first);
+      tmp_tri[v].second.clear(); vector<uint64_t>().swap(tmp_tri[v].second);
     }
   }
 
-  if (!quiet) cout << "| Two-hop time: " << time_two << endl;
   if (!quiet) AverageLabelSize();
   return time_neighbor + time_search + time_two;
 }

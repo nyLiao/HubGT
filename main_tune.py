@@ -27,9 +27,12 @@ def objective(trial, args, logger, res_logger):
     args.var_vfeat = trial.suggest_int('var_vfeat', 0, 1)
     # args.kfeat = trial.suggest_int('kfeat', 0, 8, step=4)
     # args.ns = trial.suggest_int('ns', 2, 8, step=2)
-    args.s0 = trial.suggest_int('s0', 0, 20, step=2)
-    args.s0g = trial.suggest_int('s0g', 0, 8, step=2)
-    args.s1 = trial.suggest_int('s1', 0, 20, step=2)
+    res = args.ss
+    args.s0 = trial.suggest_int('s0', 2, 28, step=2)
+    res -= args.s0
+    args.s1 = trial.suggest_int('s1', 2, min(24, res), step=2)
+    res -= args.s1
+    args.s0g = trial.suggest_int('s0g', 0, max(0, min(8, res)), step=2)
     # args.r0 = trial.suggest_float('r0', -4.0, 2.0, step=0.2)
     # args.r0g = trial.suggest_float('r0g', -4.0, 2.0, step=0.2)
     # args.r1 = trial.suggest_float('r1', -4.0, 2.0, step=0.2)
@@ -168,6 +171,7 @@ def main(args):
     study.optimize(
         partial(objective, args=args, logger=logger, res_logger=res_logger),
         n_trials=args.n_trials,
+        catch=(RuntimeError),
         # gc_after_trial=True,
         show_progress_bar=True,)
     best_params = {k: v for k, v in study.best_params.items()}

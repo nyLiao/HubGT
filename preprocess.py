@@ -14,7 +14,7 @@ import torch_geometric.utils as pyg_utils
 from load_data import SingleGraphLoader
 import utils
 from utils.collator import INF8, collate_fetch
-from Precompute2 import PyPLL
+from Precompute import PyPLL
 
 N_BPROOT = 128
 np.set_printoptions(linewidth=160, edgeitems=50, threshold=20,
@@ -66,7 +66,7 @@ def process_data(args, res_logger=utils.ResLogger()):
         mp.set_start_method('spawn')
     except RuntimeError:
         pass
-    num_workers = (1 if num_nodes < 2e4 else args.num_workers)
+    num_workers = (0 if num_nodes < 2e4 else args.num_workers)
     for split in ['train', 'val', 'test']:
         mask = getattr(data, f'{split}_mask')
         shuffle = {'train': True, 'val': False, 'test': False}[split]
